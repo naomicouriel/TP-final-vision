@@ -5,11 +5,17 @@ import torch
 import cv2
 import numpy as np
 from pathlib import Path
-from typing import Tuple, Dict, List, Union, Optional
+from typing import Tuple, Dict, List, Union, Optional, Any
 from PIL import Image
 
 from src.models.mobilenet import MobileNetClassifier
 from src.data.augmentation import get_inference_transforms
+
+import numpy as np
+import torch.serialization
+
+# Allowlist needed for PyTorch ≥2.6 checkpoints
+torch.serialization.add_safe_globals([np._core.multiarray.scalar])
 
 class RecyclingPredictor:
     """
@@ -42,7 +48,7 @@ class RecyclingPredictor:
         )
         
         # Load weights
-        checkpoint = torch.load(model_path, map_location=device)
+        checkpoint = torch.load(model_path, map_location=device, weights_only=False)
         if 'model_state_dict' in checkpoint:
             self.model.load_state_dict(checkpoint['model_state_dict'])
         else:
