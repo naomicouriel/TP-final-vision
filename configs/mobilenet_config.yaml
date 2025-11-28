@@ -1,0 +1,74 @@
+# MobileNet Recycling Classification Configuration
+
+model:
+  architecture: mobilenet_v3_large  # Options: mobilenet_v2, mobilenet_v3_small, mobilenet_v3_large
+  pretrained: true
+  num_classes: 4
+  dropout: 0.2
+
+# Class mapping from original 6 classes to new 4 classes
+class_mapping:
+  cardboard_paper: [cardboard, paper]
+  metal_plastic: [metal, plastic]
+  trash: [trash, glass]  # Glass mapped to trash (non-recyclable)
+  ecoglasses: [ecoglasses]
+
+data:
+  kaggle_dataset: "zlatan599/garbage-dataset-classification"
+  custom_ecoglasses_folder: "data/custom/ecoglasses"
+  processed_dir: "data/processed"
+  image_size: 224  # MobileNet standard input size
+  split_ratios:
+    train: 0.70
+    val: 0.15
+    test: 0.15
+  random_seed: 42
+
+training:
+  batch_size: 64
+  num_workers: 4
+  epochs: 30
+  learning_rate: 0.001
+  weight_decay: 1e-4
+  optimizer: Adam
+  scheduler:
+    type: CosineAnnealingLR
+    T_max: 30
+  
+  # Loss function
+  criterion: CrossEntropyLoss
+  label_smoothing: 0.1
+  
+  # Mixed precision training
+  use_amp: true
+  
+  # Early stopping
+  early_stopping:
+    patience: 7
+    min_delta: 0.001
+
+augmentation:
+  train:
+    horizontal_flip: 0.5
+    vertical_flip: 0.0
+    rotate_limit: 15
+    brightness_limit: 0.2
+    contrast_limit: 0.2
+    scale: [0.8, 1.2]
+    color_jitter: 0.3
+  
+  val:
+    # Minimal augmentation for validation
+    resize: 256
+    center_crop: 224
+
+paths:
+  checkpoint_dir: "outputs/checkpoints"
+  log_dir: "outputs/logs"
+  export_dir: "outputs/exports"
+
+logging:
+  use_tensorboard: true
+  use_wandb: false
+  checkpoint_frequency: 1  # Save every N epochs
+  log_frequency: 50  # Log every N batches
