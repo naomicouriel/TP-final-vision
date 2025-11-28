@@ -47,28 +47,32 @@ class MobileNetClassifier(nn.Module):
         elif architecture == 'mobilenet_v3_small':
             weights = models.MobileNet_V3_Small_Weights.IMAGENET1K_V1 if pretrained else None
             self.model = models.mobilenet_v3_small(weights=weights)
-            in_features = self.model.classifier[3].in_features
-            
-            # Replace classifier
+
+            in_features = self.model.classifier[0].in_features
+
             self.model.classifier = nn.Sequential(
-                nn.Linear(self.model.classifier[0].out_features, 1024),
+                nn.Linear(in_features, 1024),
                 nn.Hardswish(inplace=True),
                 nn.Dropout(p=dropout, inplace=True),
                 nn.Linear(1024, num_classes)
             )
+
             
         elif architecture == 'mobilenet_v3_large':
             weights = models.MobileNet_V3_Large_Weights.IMAGENET1K_V1 if pretrained else None
             self.model = models.mobilenet_v3_large(weights=weights)
-            in_features = self.model.classifier[3].in_features
-            
-            # Replace classifier
+
+            # Detectar la cantidad REAL de features de entrada (puede ser 960 o 1280)
+            in_features = self.model.classifier[0].in_features
+
+            # Reemplazar classifier manteniendo estructura original pero adaptable
             self.model.classifier = nn.Sequential(
-                nn.Linear(self.model.classifier[0].out_features, 1280),
+                nn.Linear(in_features, 1280),
                 nn.Hardswish(inplace=True),
                 nn.Dropout(p=dropout, inplace=True),
                 nn.Linear(1280, num_classes)
             )
+
         else:
             raise ValueError(f"Unknown architecture: {architecture}")
     
