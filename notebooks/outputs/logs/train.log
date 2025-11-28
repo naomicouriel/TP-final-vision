@@ -1,3 +1,15 @@
 2025-11-28 20:00:24 - training - INFO - Starting training for 30 epochs on cpu
 2025-11-28 20:03:06 - training - INFO - Starting training for 30 epochs on cpu
 2025-11-28 20:04:36 - training - INFO - Starting training for 30 epochs on cpu
+2025-11-28 20:05:20 - training - INFO - [Train] Epoch 1 | train_accuracy: 0.1324 | train_f1_macro: 0.0584 | train_loss: 0.8973 | val_accuracy: 1.0000 | val_f1_macro: 1.0000 | val_loss: 0.4290
+2025-11-28 20:06:07 - training - INFO - [Train] Epoch 2 | train_accuracy: 0.9706 | train_f1_macro: 0.4925 | train_loss: 0.5346 | val_accuracy: 1.0000 | val_f1_macro: 1.0000 | val_loss: 0.4176
+2025-11-28 20:06:46 - training - INFO - [Train] Epoch 3 | train_accuracy: 1.0000 | train_f1_macro: 1.0000 | train_loss: 0.5058 | val_accuracy: 1.0000 | val_f1_macro: 1.0000 | val_loss: 0.3945
+2025-11-28 20:07:26 - training - INFO - [Train] Epoch 4 | train_accuracy: 1.0000 | train_f1_macro: 1.0000 | train_loss: 0.3845 | val_accuracy: 1.0000 | val_f1_macro: 1.0000 | val_loss: 0.4218
+2025-11-28 20:08:12 - training - INFO - [Train] Epoch 5 | train_accuracy: 1.0000 | train_f1_macro: 1.0000 | train_loss: 0.3729 | val_accuracy: 1.0000 | val_f1_macro: 1.0000 | val_loss: 0.4006
+2025-11-28 20:08:59 - training - INFO - [Train] Epoch 6 | train_accuracy: 1.0000 | train_f1_macro: 1.0000 | train_loss: 0.4217 | val_accuracy: 1.0000 | val_f1_macro: 1.0000 | val_loss: 0.4320
+2025-11-28 20:09:41 - training - INFO - [Train] Epoch 7 | train_accuracy: 1.0000 | train_f1_macro: 1.0000 | train_loss: 0.3730 | val_accuracy: 1.0000 | val_f1_macro: 1.0000 | val_loss: 0.4863
+2025-11-28 20:10:22 - training - INFO - [Train] Epoch 8 | train_accuracy: 1.0000 | train_f1_macro: 1.0000 | train_loss: 0.3585 | val_accuracy: 1.0000 | val_f1_macro: 1.0000 | val_loss: 0.5034
+2025-11-28 20:11:07 - training - INFO - [Train] Epoch 9 | train_accuracy: 1.0000 | train_f1_macro: 1.0000 | train_loss: 0.3678 | val_accuracy: 1.0000 | val_f1_macro: 1.0000 | val_loss: 0.4690
+2025-11-28 20:11:46 - training - INFO - [Train] Epoch 10 | train_accuracy: 1.0000 | train_f1_macro: 1.0000 | train_loss: 0.3598 | val_accuracy: 1.0000 | val_f1_macro: 1.0000 | val_loss: 0.4196
+2025-11-28 20:11:46 - training - INFO - Early stopping triggered.
+2025-11-28 20:11:46 - training - INFO - Training completed.
