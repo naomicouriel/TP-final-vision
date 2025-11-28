@@ -106,6 +106,9 @@ class RecyclingPredictor:
             'probabilities': probs.cpu().numpy()[0]
         }
         
+        # DEBUG: Print probabilities to console
+        print(f"Pred: {result['class_id']} | Probs: {[f'{p:.4f}' for p in result['probabilities']]}")
+        
         if self.class_mapping:
             result['class_name'] = self.class_mapping.get(pred_idx, str(pred_idx))
             

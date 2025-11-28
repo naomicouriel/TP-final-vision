@@ -13,3 +13,4 @@
 2025-11-28 20:11:46 - training - INFO - [Train] Epoch 10 | train_accuracy: 1.0000 | train_f1_macro: 1.0000 | train_loss: 0.3598 | val_accuracy: 1.0000 | val_f1_macro: 1.0000 | val_loss: 0.4196
 2025-11-28 20:11:46 - training - INFO - Early stopping triggered.
 2025-11-28 20:11:46 - training - INFO - Training completed.
+2025-11-28 20:46:16 - training - INFO - Starting training for 30 epochs on cpu

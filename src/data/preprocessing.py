@@ -101,18 +101,30 @@ def create_dataset_csv(
     if raw_path.exists():
         logger.info(f"Processing raw data from {raw_path}")
         # Assuming structure: raw_path / class_name / image.jpg
-        for class_dir in raw_path.iterdir():
-            if class_dir.is_dir():
-                original_label = class_dir.name.lower()
+        # Search for class directories recursively
+        # This handles nested structures like raw_path/Garbage_Dataset_Classification/images/class_name
+        for root, dirs, files in os.walk(raw_path):
+            for d in dirs:
+                original_label = d.lower()
                 
-                # Check if this label should be mapped
+                # Check if this directory name matches one of our expected classes
                 if original_label in old_to_new:
+                    class_dir = Path(root) / d
                     new_label = old_to_new[original_label]
+                    
+                    logger.info(f"Found class directory: {original_label} -> {new_label} at {class_dir}")
+                    
                     images = get_image_files(class_dir)
                     
                     for img in images:
                         # Store relative path
-                        rel_path = img.relative_to(Path("data")) # Assuming data is root
+                        try:
+                            rel_path = img.relative_to(Path("data")) # Assuming data is root
+                        except ValueError:
+                            # If path is not relative to data, try to make it relative to project root
+                            # or just keep it as is if it works with the loader
+                            rel_path = img
+
                         all_data.append({
                             'filename': str(rel_path),
                             'label': new_label,
