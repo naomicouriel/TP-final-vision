@@ -14,3 +14,34 @@
 2025-11-28 20:11:46 - training - INFO - Early stopping triggered.
 2025-11-28 20:11:46 - training - INFO - Training completed.
 2025-11-28 20:46:16 - training - INFO - Starting training for 30 epochs on cpu
+2025-11-28 21:19:20 - training - INFO - [Train] Epoch 1 | train_accuracy: 0.8037 | train_f1_macro: 0.7446 | train_loss: 0.7160 | val_accuracy: 0.9048 | val_f1_macro: 0.9098 | val_loss: 0.5586
+2025-11-28 22:11:37 - training - INFO - [Train] Epoch 2 | train_accuracy: 0.8698 | train_f1_macro: 0.8708 | train_loss: 0.5967 | val_accuracy: 0.9114 | val_f1_macro: 0.8641 | val_loss: 0.5320
+2025-11-28 22:43:54 - training - INFO - [Train] Epoch 3 | train_accuracy: 0.8898 | train_f1_macro: 0.8983 | train_loss: 0.5610 | val_accuracy: 0.8900 | val_f1_macro: 0.9163 | val_loss: 0.5680
+2025-11-28 23:17:50 - training - INFO - [Train] Epoch 4 | train_accuracy: 0.9038 | train_f1_macro: 0.9109 | train_loss: 0.5314 | val_accuracy: 0.9195 | val_f1_macro: 0.9393 | val_loss: 0.5179
+2025-11-28 23:50:47 - training - INFO - [Train] Epoch 5 | train_accuracy: 0.9118 | train_f1_macro: 0.9072 | train_loss: 0.5226 | val_accuracy: 0.9176 | val_f1_macro: 0.9362 | val_loss: 0.5029
+2025-11-29 00:26:25 - training - INFO - [Train] Epoch 6 | train_accuracy: 0.9182 | train_f1_macro: 0.9234 | train_loss: 0.5116 | val_accuracy: 0.9352 | val_f1_macro: 0.9510 | val_loss: 0.4755
+2025-11-29 01:05:37 - training - INFO - [Train] Epoch 7 | train_accuracy: 0.9281 | train_f1_macro: 0.9313 | train_loss: 0.4929 | val_accuracy: 0.9086 | val_f1_macro: 0.9309 | val_loss: 0.5401
+2025-11-29 01:41:33 - training - INFO - [Train] Epoch 8 | train_accuracy: 0.9283 | train_f1_macro: 0.9367 | train_loss: 0.4878 | val_accuracy: 0.9276 | val_f1_macro: 0.9297 | val_loss: 0.4963
+2025-11-29 02:15:41 - training - INFO - [Train] Epoch 9 | train_accuracy: 0.9343 | train_f1_macro: 0.9395 | train_loss: 0.4818 | val_accuracy: 0.9352 | val_f1_macro: 0.9508 | val_loss: 0.4784
+2025-11-29 02:49:09 - training - INFO - [Train] Epoch 10 | train_accuracy: 0.9444 | train_f1_macro: 0.9488 | train_loss: 0.4622 | val_accuracy: 0.9462 | val_f1_macro: 0.9593 | val_loss: 0.4631
+2025-11-29 03:22:07 - training - INFO - [Train] Epoch 11 | train_accuracy: 0.9401 | train_f1_macro: 0.9403 | train_loss: 0.4661 | val_accuracy: 0.9443 | val_f1_macro: 0.9578 | val_loss: 0.4727
+2025-11-29 03:54:37 - training - INFO - [Train] Epoch 12 | train_accuracy: 0.9483 | train_f1_macro: 0.9518 | train_loss: 0.4486 | val_accuracy: 0.9376 | val_f1_macro: 0.9526 | val_loss: 0.4883
+2025-11-29 04:27:20 - training - INFO - [Train] Epoch 13 | train_accuracy: 0.9534 | train_f1_macro: 0.9520 | train_loss: 0.4447 | val_accuracy: 0.9376 | val_f1_macro: 0.9527 | val_loss: 0.4692
+2025-11-29 04:59:45 - training - INFO - [Train] Epoch 14 | train_accuracy: 0.9476 | train_f1_macro: 0.9550 | train_loss: 0.4531 | val_accuracy: 0.9457 | val_f1_macro: 0.9586 | val_loss: 0.4586
+2025-11-29 05:35:22 - training - INFO - [Train] Epoch 15 | train_accuracy: 0.9612 | train_f1_macro: 0.9634 | train_loss: 0.4316 | val_accuracy: 0.9614 | val_f1_macro: 0.9708 | val_loss: 0.4414
+2025-11-29 06:11:07 - training - INFO - [Train] Epoch 16 | train_accuracy: 0.9623 | train_f1_macro: 0.9575 | train_loss: 0.4258 | val_accuracy: 0.9590 | val_f1_macro: 0.9537 | val_loss: 0.4444
+2025-11-29 06:44:34 - training - INFO - [Train] Epoch 17 | train_accuracy: 0.9689 | train_f1_macro: 0.9710 | train_loss: 0.4174 | val_accuracy: 0.9576 | val_f1_macro: 0.9678 | val_loss: 0.4421
+2025-11-29 07:17:32 - training - INFO - [Train] Epoch 18 | train_accuracy: 0.9683 | train_f1_macro: 0.9707 | train_loss: 0.4167 | val_accuracy: 0.9533 | val_f1_macro: 0.9644 | val_loss: 0.4528
+2025-11-29 07:50:37 - training - INFO - [Train] Epoch 19 | train_accuracy: 0.9716 | train_f1_macro: 0.9714 | train_loss: 0.4103 | val_accuracy: 0.9500 | val_f1_macro: 0.9622 | val_loss: 0.4595
+2025-11-29 08:23:10 - training - INFO - [Train] Epoch 20 | train_accuracy: 0.9753 | train_f1_macro: 0.9796 | train_loss: 0.4012 | val_accuracy: 0.9567 | val_f1_macro: 0.9671 | val_loss: 0.4446
+2025-11-29 08:55:24 - training - INFO - [Train] Epoch 21 | train_accuracy: 0.9768 | train_f1_macro: 0.9788 | train_loss: 0.3987 | val_accuracy: 0.9629 | val_f1_macro: 0.9718 | val_loss: 0.4319
+2025-11-29 09:32:04 - training - INFO - [Train] Epoch 22 | train_accuracy: 0.9796 | train_f1_macro: 0.9791 | train_loss: 0.3961 | val_accuracy: 0.9624 | val_f1_macro: 0.9716 | val_loss: 0.4344
+2025-11-29 10:07:32 - training - INFO - [Train] Epoch 23 | train_accuracy: 0.9815 | train_f1_macro: 0.9860 | train_loss: 0.3877 | val_accuracy: 0.9629 | val_f1_macro: 0.9718 | val_loss: 0.4308
+2025-11-29 10:40:27 - training - INFO - [Train] Epoch 24 | train_accuracy: 0.9849 | train_f1_macro: 0.9868 | train_loss: 0.3846 | val_accuracy: 0.9643 | val_f1_macro: 0.9730 | val_loss: 0.4289
+2025-11-29 11:18:09 - training - INFO - [Train] Epoch 25 | train_accuracy: 0.9849 | train_f1_macro: 0.9868 | train_loss: 0.3845 | val_accuracy: 0.9638 | val_f1_macro: 0.9726 | val_loss: 0.4281
+2025-11-29 11:50:59 - training - INFO - [Train] Epoch 26 | train_accuracy: 0.9848 | train_f1_macro: 0.9885 | train_loss: 0.3812 | val_accuracy: 0.9681 | val_f1_macro: 0.9758 | val_loss: 0.4243
+2025-11-29 12:23:42 - training - INFO - [Train] Epoch 27 | train_accuracy: 0.9862 | train_f1_macro: 0.9896 | train_loss: 0.3801 | val_accuracy: 0.9643 | val_f1_macro: 0.9730 | val_loss: 0.4245
+2025-11-29 12:57:35 - training - INFO - [Train] Epoch 28 | train_accuracy: 0.9879 | train_f1_macro: 0.9890 | train_loss: 0.3759 | val_accuracy: 0.9676 | val_f1_macro: 0.9755 | val_loss: 0.4241
+2025-11-29 14:02:15 - training - INFO - [Train] Epoch 29 | train_accuracy: 0.9868 | train_f1_macro: 0.9866 | train_loss: 0.3815 | val_accuracy: 0.9681 | val_f1_macro: 0.9758 | val_loss: 0.4234
+2025-11-29 14:34:53 - training - INFO - [Train] Epoch 30 | train_accuracy: 0.9884 | train_f1_macro: 0.9877 | train_loss: 0.3763 | val_accuracy: 0.9690 | val_f1_macro: 0.9765 | val_loss: 0.4231
+2025-11-29 14:34:54 - training - INFO - Training completed.
