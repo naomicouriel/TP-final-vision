@@ -1,0 +1,5 @@
+*.pycache
+__pycache__/
+*.pyo
+src/__pycache__/__init__.cpython-313.pyc
+src/utils/__pycache__/config.cpython-313.pyc 
