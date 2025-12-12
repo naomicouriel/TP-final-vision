@@ -22,8 +22,8 @@ class CameraInferenceWithGradCAM:
         self,
         predictor: RecyclingPredictor,
         camera_id: int = 0,
-        width: int = 640,
-        height: int = 480,
+        width: int = 2000,
+        height: int = 2000,
         fps: int = 30,
         enable_gradcam: bool = True,
         stability_duration: float = 4.0,  # seconds to wait for stable prediction
@@ -48,7 +48,7 @@ class CameraInferenceWithGradCAM:
         self.last_sent_class = None
         
         # Zoom functionality
-        self.zoom_level = 1.0
+        self.zoom_level = 2.1
         self.zoom_step = 0.1
         self.min_zoom = 1.0
         self.max_zoom = 3.0
