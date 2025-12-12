@@ -6,6 +6,7 @@ import time
 import numpy as np
 from typing import Callable, Optional
 import logging
+from collections import deque
 
 from src.inference.predictor import RecyclingPredictor
 from src.inference.gradcam import GradCAMPredictor
@@ -24,7 +25,8 @@ class CameraInferenceWithGradCAM:
         width: int = 640,
         height: int = 480,
         fps: int = 30,
-        enable_gradcam: bool = True
+        enable_gradcam: bool = True,
+        stability_duration: float = 4.0  # seconds to wait for stable prediction
     ):
         self.predictor = predictor
         self.camera_id = camera_id
@@ -34,6 +36,18 @@ class CameraInferenceWithGradCAM:
         self.cap = None
         self.is_running = False
         self.enable_gradcam = enable_gradcam
+        
+        # Stability tracking for Arduino
+        self.stability_duration = stability_duration
+        self.prediction_history = deque(maxlen=100)  # Keep last 100 predictions
+        self.last_stable_class = None
+        self.last_sent_class = None
+        
+        # Zoom functionality
+        self.zoom_level = 1.0
+        self.zoom_step = 0.1
+        self.min_zoom = 1.0
+        self.max_zoom = 3.0
         
         # Setup Grad-CAM
         if self.enable_gradcam:
@@ -60,6 +74,74 @@ class CameraInferenceWithGradCAM:
         cv2.destroyAllWindows()
         logger.info("Camera stopped.")
 
+    def apply_zoom(self, frame):
+        """Apply digital zoom to frame."""
+        if self.zoom_level == 1.0:
+            return frame
+        
+        height, width = frame.shape[:2]
+        
+        # Calculate crop size
+        crop_width = int(width / self.zoom_level)
+        crop_height = int(height / self.zoom_level)
+        
+        # Calculate center crop
+        x = (width - crop_width) // 2
+        y = (height - crop_height) // 2
+        
+        # Crop and resize back to original size
+        cropped = frame[y:y+crop_height, x:x+crop_width]
+        zoomed = cv2.resize(cropped, (width, height), interpolation=cv2.INTER_LINEAR)
+        
+        return zoomed
+    
+    def check_stability(self, class_id: int, confidence: float, min_confidence: float = 0.7):
+        """
+        Check if the prediction has been stable for the required duration.
+        
+        Args:
+            class_id: Current predicted class
+            confidence: Confidence of prediction
+            min_confidence: Minimum confidence to consider prediction valid
+            
+        Returns:
+            tuple: (is_stable, stable_class_id) - Whether prediction is stable and which class
+        """
+        current_time = time.time()
+        
+        # Only track high-confidence predictions
+        if confidence >= min_confidence:
+            self.prediction_history.append((current_time, class_id))
+        
+        # Remove old predictions outside stability window
+        cutoff_time = current_time - self.stability_duration
+        while self.prediction_history and self.prediction_history[0][0] < cutoff_time:
+            self.prediction_history.popleft()
+        
+        # Check if we have enough predictions in the window
+        if len(self.prediction_history) < 5:  # Need at least 5 predictions
+            return False, None
+        
+        # Check if all recent predictions are the same class
+        recent_classes = [cls for _, cls in self.prediction_history]
+        if len(set(recent_classes)) == 1:  # All predictions are the same
+            stable_class = recent_classes[0]
+            
+            # Only return True if this is different from last sent class
+            if stable_class != self.last_sent_class:
+                self.last_stable_class = stable_class
+                return True, stable_class
+        
+        return False, None
+    
+    def process_frame(self, frame):
+        """
+        Process a single frame and return prediction result.
+        Can be overridden by subclasses (e.g., for Arduino integration).
+        """
+        # This method can be overridden for custom processing
+        return None
+
     def run(self, callback: Optional[Callable[[dict], None]] = None):
         """
         Run inference loop with Grad-CAM visualization.
@@ -72,6 +154,7 @@ class CameraInferenceWithGradCAM:
             
         logger.info("Starting inference loop with Grad-CAM visualization.")
         logger.info("Press 'q' to quit, 'g' to toggle Grad-CAM, 's' to save frame")
+        logger.info("Press '+'/'-' to zoom in/out")
         
         try:
             while self.is_running:
@@ -79,6 +162,9 @@ class CameraInferenceWithGradCAM:
                 if not ret:
                     logger.warning("Failed to grab frame")
                     break
+                
+                # Apply zoom
+                frame = self.apply_zoom(frame)
                 
                 # Convert to RGB for model
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -97,14 +183,26 @@ class CameraInferenceWithGradCAM:
                 
                 inference_time = (time.time() - start_time) * 1000
                 
+                # Check stability and call process_frame for custom behavior
+                class_id = result['class_id']
+                confidence = result['confidence']
+                is_stable, stable_class = self.check_stability(class_id, confidence)
+                
+                # Call custom process_frame (for Arduino integration)
+                if is_stable and stable_class is not None:
+                    result['stable_class'] = stable_class
+                    self.process_frame(result)
+                
                 # Draw results
                 class_name = result.get('class_name', str(result['class_id']))
                 conf = result['confidence']
                 
-                # Main prediction text
-                text = f"{class_name}: {conf:.2f}"
+                # Main prediction text with stability indicator
+                stability_indicator = "✓ STABLE" if is_stable else ""
+                text = f"{class_name}: {conf:.2f} {stability_indicator}"
+                color = (0, 255, 0) if is_stable else (255, 255, 0)
                 cv2.putText(display_frame, text, (10, 30), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
                 
                 # Inference time
                 time_text = f"{inference_time:.1f}ms"
@@ -113,10 +211,10 @@ class CameraInferenceWithGradCAM:
                 
                 # Show probabilities for all classes
                 y_offset = 110
-                for class_id, prob in enumerate(result['probabilities']):
-                    class_label = self.predictor.class_mapping.get(class_id, f"Class {class_id}")
+                for idx, prob in enumerate(result['probabilities']):
+                    class_label = self.predictor.class_mapping.get(idx, f"Class {idx}")
                     prob_text = f"{class_label}: {prob:.3f}"
-                    color = (0, 255, 0) if class_id == result['class_id'] else (200, 200, 200)
+                    color = (0, 255, 0) if idx == result['class_id'] else (200, 200, 200)
                     cv2.putText(display_frame, prob_text, (10, y_offset), 
                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
                     y_offset += 25
@@ -127,8 +225,13 @@ class CameraInferenceWithGradCAM:
                            (display_frame.shape[1] - 180, 30),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
                 
+                # Zoom level
+                cv2.putText(display_frame, f"Zoom: {self.zoom_level:.1f}x", 
+                           (display_frame.shape[1] - 180, 60),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+                
                 # Instructions
-                cv2.putText(display_frame, "Press 'q': quit | 'g': toggle Grad-CAM | 's': save", 
+                cv2.putText(display_frame, "q: quit | g: Grad-CAM | s: save | +/-: zoom", 
                            (10, display_frame.shape[0] - 10),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
                 
@@ -151,6 +254,12 @@ class CameraInferenceWithGradCAM:
                     filename = f"capture_{int(time.time())}.jpg"
                     cv2.imwrite(filename, display_frame)
                     print(f"Saved frame to {filename}")
+                elif key == ord('+') or key == ord('='):
+                    self.zoom_level = min(self.zoom_level + self.zoom_step, self.max_zoom)
+                    print(f"Zoom: {self.zoom_level:.1f}x")
+                elif key == ord('-') or key == ord('_'):
+                    self.zoom_level = max(self.zoom_level - self.zoom_step, self.min_zoom)
+                    print(f"Zoom: {self.zoom_level:.1f}x")
                     
         except KeyboardInterrupt:
             logger.info("Interrupted by user")

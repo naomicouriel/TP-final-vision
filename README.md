@@ -96,11 +96,21 @@ Abrir y ejecutar **`notebooks/03_inference_demo.ipynb`**:
 camera = CameraInferenceWithGradCAM(predictor, camera_id=0, enable_gradcam=True)
 camera.run()  # Presionar 'g' para toggle Grad-CAM, 'q' para salir
 
-# Con Arduino (clasificación + control físico)
+# Con Arduino (clasificación + control físico con estabilidad temporal)
 arduino = ArduinoController(port='COM3', baudrate=9600)  # Ajustar puerto
-camera_arduino = CameraInferenceWithArduino(predictor, arduino, camera_id=0)
+camera_arduino = CameraInferenceWithArduino(
+    predictor, 
+    arduino, 
+    camera_id=0,
+    stability_duration=4.0  # Espera 4 segundos de clasificación estable
+)
 camera_arduino.run()
 ```
+
+**Mejoras importantes:**
+- **Estabilidad temporal**: El sistema espera 4-5 segundos con la misma clasificación antes de enviar al Arduino, evitando clasificaciones erróneas por frames individuales
+- **Zoom digital**: Acercar/alejar la imagen con teclas `+`/`-` (rango: 1.0x a 3.0x)
+- **Indicador visual**: Muestra "✓ STABLE" cuando la clasificación es consistente
 
 ### 2. Integración con Arduino
 
@@ -149,11 +159,37 @@ arduino = ArduinoController(port='TU_PUERTO_AQUI', baudrate=9600)
 - pyserial (para Arduino)
 - PIL/Pillow
 
-## Controles de Cámara
+## 🎮 Controles de Cámara
 
 - **`q`**: Salir
 - **`g`**: Toggle Grad-CAM (activar/desactivar visualización)
 - **`s`**: Guardar frame actual
+- **`+` / `=`**: Zoom in (acercar)
+- **`-` / `_`**: Zoom out (alejar)
+
+### Funcionamiento del Sistema de Estabilidad
+
+Para evitar enviar múltiples comandos al Arduino en cada frame de video:
+
+```
+Frame 1: plastic (0.85) ─┐
+Frame 2: plastic (0.88)  ├─── Acumulando...
+Frame 3: plastic (0.82)  │
+Frame 4: plastic (0.90)  ├─── 4 segundos ✓
+Frame 5: plastic (0.87) ─┘    └─→ ENVIAR al Arduino (clase 2)
+Frame 6: plastic (0.91) ────── No enviar (ya enviado)
+Frame 7: glass (0.75)   ─┐
+Frame 8: glass (0.80)    ├─── Acumulando nueva clase...
+...
+```
+
+**Proceso:**
+1. El sistema rastrea las últimas predicciones con alta confianza (>0.7)
+2. Solo cuando **la misma clase se mantiene por 4-5 segundos consecutivos**, se considera "estable"
+3. Una vez estable, se envía **una única instrucción** al Arduino
+4. No se envía otra instrucción hasta que cambie la clasificación y se estabilice nuevamente
+
+Esto previene movimientos erráticos del hardware y mejora la precisión del sistema físico.
 
 ## Resultados del Modelo
 
@@ -165,9 +201,26 @@ Para reentrenar el modelo, ejecutar secuencialmente:
 1. `notebooks/01_data_preparation.ipynb` - Preparar datos
 2. `notebooks/02_train_mobilenet.ipynb` - Entrenar modelo
 
-## Notas
+## 📝 Notas
 
 - Los archivos `.py` en la raíz fueron utilizados para tests durante desarrollo
 - El código de producción está en el directorio `src/`
 - Grad-CAM ayuda a entender qué características visuales usa el modelo para clasificar
-- El umbral de confianza para Arduino es configurable (default: 0.6)
+- El umbral de confianza para Arduino es configurable (default: 0.7)
+
+### ⚡ Características Avanzadas
+
+#### Sistema de Estabilidad Temporal
+- Previene envíos múltiples al Arduino durante video continuo
+- Requiere clasificación consistente durante 4-5 segundos antes de enviar
+- Configurable mediante el parámetro `stability_duration`
+
+#### Zoom Digital
+- Acercamiento hasta 3x sin pérdida de calidad significativa
+- Útil para objetos pequeños o distantes
+- Control en tiempo real con teclas `+` y `-`
+
+#### Visualización Mejorada
+- Indicador de estabilidad en pantalla ("✓ STABLE")
+- Color verde cuando hay clasificación estable
+- Probabilidades de todas las clases en tiempo real
