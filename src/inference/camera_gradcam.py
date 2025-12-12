@@ -26,7 +26,8 @@ class CameraInferenceWithGradCAM:
         height: int = 480,
         fps: int = 30,
         enable_gradcam: bool = True,
-        stability_duration: float = 4.0  # seconds to wait for stable prediction
+        stability_duration: float = 4.0,  # seconds to wait for stable prediction
+        stereo_mode: str = None  # Options: None, 'left', 'right'
     ):
         self.predictor = predictor
         self.camera_id = camera_id
@@ -36,6 +37,9 @@ class CameraInferenceWithGradCAM:
         self.cap = None
         self.is_running = False
         self.enable_gradcam = enable_gradcam
+        
+        # Stereo camera handling
+        self.stereo_mode = stereo_mode  # None, 'left', or 'right'
         
         # Stability tracking for Arduino
         self.stability_duration = stability_duration
@@ -74,6 +78,23 @@ class CameraInferenceWithGradCAM:
         cv2.destroyAllWindows()
         logger.info("Camera stopped.")
 
+    def extract_stereo_view(self, frame):
+        """Extract single view from stereo camera if stereo_mode is set."""
+        if self.stereo_mode is None:
+            return frame
+        
+        height, width = frame.shape[:2]
+        half_width = width // 2
+        
+        if self.stereo_mode == 'left':
+            # Use left half of the image
+            return frame[:, :half_width]
+        elif self.stereo_mode == 'right':
+            # Use right half of the image
+            return frame[:, half_width:]
+        
+        return frame
+    
     def apply_zoom(self, frame):
         """Apply digital zoom to frame."""
         if self.zoom_level == 1.0:
@@ -134,7 +155,7 @@ class CameraInferenceWithGradCAM:
         
         return False, None
     
-    def process_frame(self, frame):
+    def process_frame(self, result):
         """
         Process a single frame and return prediction result.
         Can be overridden by subclasses (e.g., for Arduino integration).
@@ -162,6 +183,9 @@ class CameraInferenceWithGradCAM:
                 if not ret:
                     logger.warning("Failed to grab frame")
                     break
+                
+                # Extract single view if stereo camera
+                frame = self.extract_stereo_view(frame)
                 
                 # Apply zoom
                 frame = self.apply_zoom(frame)
@@ -222,12 +246,15 @@ class CameraInferenceWithGradCAM:
                 # Grad-CAM status
                 gradcam_status = "ON" if self.enable_gradcam else "OFF"
                 cv2.putText(display_frame, f"Grad-CAM: {gradcam_status}", 
-                           (display_frame.shape[1] - 180, 30),
+                           (display_frame.shape[1] - 220, 30),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
                 
-                # Zoom level
-                cv2.putText(display_frame, f"Zoom: {self.zoom_level:.1f}x", 
-                           (display_frame.shape[1] - 180, 60),
+                # Zoom level and stereo mode
+                zoom_text = f"Zoom: {self.zoom_level:.1f}x"
+                if self.stereo_mode:
+                    zoom_text += f" ({self.stereo_mode.upper()})"
+                cv2.putText(display_frame, zoom_text, 
+                           (display_frame.shape[1] - 220, 60),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
                 
                 # Instructions

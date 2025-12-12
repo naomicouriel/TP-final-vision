@@ -92,9 +92,18 @@ Abrir y ejecutar **`notebooks/03_inference_demo.ipynb`**:
 #### Ejecutar inferencia con cámara:
 
 ```python
-# Sin Arduino (solo clasificación visual)
+# Cámara normal (mono)
 camera = CameraInferenceWithGradCAM(predictor, camera_id=0, enable_gradcam=True)
-camera.run()  # Presionar 'g' para toggle Grad-CAM, 'q' para salir
+camera.run()
+
+# Cámara ESTÉREO - usar solo vista izquierda o derecha
+camera = CameraInferenceWithGradCAM(
+    predictor, 
+    camera_id=0, 
+    enable_gradcam=True,
+    stereo_mode='left'  # o 'right' para vista derecha
+)
+camera.run()
 
 # Con Arduino (clasificación + control físico con estabilidad temporal)
 arduino = ArduinoController(port='COM3', baudrate=9600)  # Ajustar puerto
@@ -102,7 +111,8 @@ camera_arduino = CameraInferenceWithArduino(
     predictor, 
     arduino, 
     camera_id=0,
-    stability_duration=4.0  # Espera 4 segundos de clasificación estable
+    stability_duration=4.0,  # Espera 4 segundos de clasificación estable
+    stereo_mode='left'  # Para cámara estéreo, usar 'left' o 'right'
 )
 camera_arduino.run()
 ```
@@ -110,6 +120,7 @@ camera_arduino.run()
 **Mejoras importantes:**
 - **Estabilidad temporal**: El sistema espera 4-5 segundos con la misma clasificación antes de enviar al Arduino, evitando clasificaciones erróneas por frames individuales
 - **Zoom digital**: Acercar/alejar la imagen con teclas `+`/`-` (rango: 1.0x a 3.0x)
+- **Soporte para cámara estéreo**: Extrae automáticamente la vista izquierda o derecha antes de procesar
 - **Indicador visual**: Muestra "✓ STABLE" cuando la clasificación es consistente
 
 ### 2. Integración con Arduino
@@ -219,6 +230,13 @@ Para reentrenar el modelo, ejecutar secuencialmente:
 - Acercamiento hasta 3x sin pérdida de calidad significativa
 - Útil para objetos pequeños o distantes
 - Control en tiempo real con teclas `+` y `-`
+- Funciona correctamente con cámaras estéreo (aplicado después de extraer vista única)
+
+#### Soporte Cámara Estéreo
+- Detecta automáticamente si tu cámara envía dos vistas lado a lado
+- Extrae solo la vista izquierda o derecha antes de procesar
+- Evita problemas de zoom "lateral" en sistemas estéreo
+- Configuración: `stereo_mode='left'` o `'right'` (None para cámara normal)
 
 #### Visualización Mejorada
 - Indicador de estabilidad en pantalla ("✓ STABLE")
