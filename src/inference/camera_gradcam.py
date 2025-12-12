@@ -27,7 +27,9 @@ class CameraInferenceWithGradCAM:
         fps: int = 30,
         enable_gradcam: bool = True,
         stability_duration: float = 4.0,  # seconds to wait for stable prediction
-        stereo_mode: str = None  # Options: None, 'left', 'right'
+        stereo_mode: str = None,  # Options: None, 'left', 'right'
+        black_threshold: float = 0.7,  # Percentage of black pixels to consider empty (0-1)
+        brightness_threshold: int = 40  # Max average brightness for black detection (0-255)
     ):
         self.predictor = predictor
         self.camera_id = camera_id
@@ -40,6 +42,10 @@ class CameraInferenceWithGradCAM:
         
         # Stereo camera handling
         self.stereo_mode = stereo_mode  # None, 'left', or 'right'
+        
+        # Empty frame detection (for black background)
+        self.black_threshold = black_threshold
+        self.brightness_threshold = brightness_threshold
         
         # Stability tracking for Arduino
         self.stability_duration = stability_duration
@@ -78,6 +84,32 @@ class CameraInferenceWithGradCAM:
         cv2.destroyAllWindows()
         logger.info("Camera stopped.")
 
+    def is_frame_empty(self, frame):
+        """
+        Detect if frame is mostly black (empty tray).
+        
+        Args:
+            frame: BGR image frame
+            
+        Returns:
+            tuple: (is_empty, black_percentage, avg_brightness)
+        """
+        # Convert to grayscale
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        # Calculate average brightness
+        avg_brightness = np.mean(gray)
+        
+        # Count pixels below brightness threshold
+        black_pixels = np.sum(gray < self.brightness_threshold)
+        total_pixels = gray.size
+        black_percentage = black_pixels / total_pixels
+        
+        # Consider empty if percentage of dark pixels exceeds threshold
+        is_empty = black_percentage > self.black_threshold
+        
+        return is_empty, black_percentage, avg_brightness
+    
     def extract_stereo_view(self, frame):
         """Extract single view from stereo camera if stereo_mode is set."""
         if self.stereo_mode is None:
@@ -190,58 +222,79 @@ class CameraInferenceWithGradCAM:
                 # Apply zoom
                 frame = self.apply_zoom(frame)
                 
+                # Check if frame is empty (mostly black)
+                is_empty, black_pct, avg_bright = self.is_frame_empty(frame)
+                
                 # Convert to RGB for model
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 
                 start_time = time.time()
                 
-                if self.enable_gradcam:
-                    # Run inference with Grad-CAM
-                    result, gradcam_overlay = self.gradcam_predictor.predict_with_cam(rgb_frame)
-                    # Convert overlay back to BGR for display
-                    display_frame = cv2.cvtColor(gradcam_overlay, cv2.COLOR_RGB2BGR)
+                # Only run inference if frame is not empty
+                if not is_empty:
+                    if self.enable_gradcam:
+                        # Run inference with Grad-CAM
+                        result, gradcam_overlay = self.gradcam_predictor.predict_with_cam(rgb_frame)
+                        # Convert overlay back to BGR for display
+                        display_frame = cv2.cvtColor(gradcam_overlay, cv2.COLOR_RGB2BGR)
+                    else:
+                        # Run normal inference
+                        result = self.predictor.predict(rgb_frame)
+                        display_frame = frame.copy()
+                    
+                    inference_time = (time.time() - start_time) * 1000
+                    
+                    # Check stability and call process_frame for custom behavior
+                    class_id = result['class_id']
+                    confidence = result['confidence']
+                    is_stable, stable_class = self.check_stability(class_id, confidence)
+                    
+                    # Call custom process_frame (for Arduino integration)
+                    if is_stable and stable_class is not None:
+                        result['stable_class'] = stable_class
+                        self.process_frame(result)
                 else:
-                    # Run normal inference
-                    result = self.predictor.predict(rgb_frame)
+                    # Frame is empty - skip inference
                     display_frame = frame.copy()
-                
-                inference_time = (time.time() - start_time) * 1000
-                
-                # Check stability and call process_frame for custom behavior
-                class_id = result['class_id']
-                confidence = result['confidence']
-                is_stable, stable_class = self.check_stability(class_id, confidence)
-                
-                # Call custom process_frame (for Arduino integration)
-                if is_stable and stable_class is not None:
-                    result['stable_class'] = stable_class
-                    self.process_frame(result)
+                    inference_time = 0
+                    result = None
+                    is_stable = False
                 
                 # Draw results
-                class_name = result.get('class_name', str(result['class_id']))
-                conf = result['confidence']
+                if result is not None:
+                    class_name = result.get('class_name', str(result['class_id']))
+                    conf = result['confidence']
+                    
+                    # Main prediction text with stability indicator
+                    stability_indicator = "✓ STABLE" if is_stable else ""
+                    text = f"{class_name}: {conf:.2f} {stability_indicator}"
+                    color = (0, 255, 0) if is_stable else (255, 255, 0)
+                    cv2.putText(display_frame, text, (10, 30), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+                else:
+                    # Show empty frame indicator
+                    text = "BANDEJA VACIA - Esperando objeto..."
+                    cv2.putText(display_frame, text, (10, 30), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 1, (128, 128, 128), 2)
+                    cv2.putText(display_frame, f"Negro: {black_pct*100:.1f}% | Brillo: {avg_bright:.0f}", 
+                               (10, 70),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (128, 128, 128), 2)
                 
-                # Main prediction text with stability indicator
-                stability_indicator = "✓ STABLE" if is_stable else ""
-                text = f"{class_name}: {conf:.2f} {stability_indicator}"
-                color = (0, 255, 0) if is_stable else (255, 255, 0)
-                cv2.putText(display_frame, text, (10, 30), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-                
-                # Inference time
-                time_text = f"{inference_time:.1f}ms"
-                cv2.putText(display_frame, time_text, (10, 70), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                
-                # Show probabilities for all classes
-                y_offset = 110
-                for idx, prob in enumerate(result['probabilities']):
-                    class_label = self.predictor.class_mapping.get(idx, f"Class {idx}")
-                    prob_text = f"{class_label}: {prob:.3f}"
-                    color = (0, 255, 0) if idx == result['class_id'] else (200, 200, 200)
-                    cv2.putText(display_frame, prob_text, (10, y_offset), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-                    y_offset += 25
+                # Inference time (only if not empty)
+                if result is not None:
+                    time_text = f"{inference_time:.1f}ms"
+                    cv2.putText(display_frame, time_text, (10, 100), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    
+                    # Show probabilities for all classes
+                    y_offset = 140
+                    for idx, prob in enumerate(result['probabilities']):
+                        class_label = self.predictor.class_mapping.get(idx, f"Class {idx}")
+                        prob_text = f"{class_label}: {prob:.3f}"
+                        color = (0, 255, 0) if idx == result['class_id'] else (200, 200, 200)
+                        cv2.putText(display_frame, prob_text, (10, y_offset), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                        y_offset += 25
                 
                 # Grad-CAM status
                 gradcam_status = "ON" if self.enable_gradcam else "OFF"

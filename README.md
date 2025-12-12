@@ -105,23 +105,26 @@ camera = CameraInferenceWithGradCAM(
 )
 camera.run()
 
-# Con Arduino (clasificación + control físico con estabilidad temporal)
+# Con Arduino y detección de bandeja vacía
 arduino = ArduinoController(port='COM3', baudrate=9600)  # Ajustar puerto
 camera_arduino = CameraInferenceWithArduino(
     predictor, 
     arduino, 
     camera_id=0,
     stability_duration=4.0,  # Espera 4 segundos de clasificación estable
-    stereo_mode='left'  # Para cámara estéreo, usar 'left' o 'right'
+    stereo_mode='left',  # Para cámara estéreo, usar 'left' o 'right'
+    black_threshold=0.7,  # 70% de pixeles negros = bandeja vacía
+    brightness_threshold=40  # Brillo máximo para considerar pixel "negro"
 )
 camera_arduino.run()
 ```
 
 **Mejoras importantes:**
 - **Estabilidad temporal**: El sistema espera 4-5 segundos con la misma clasificación antes de enviar al Arduino, evitando clasificaciones erróneas por frames individuales
+- **Detección de bandeja vacía**: No clasifica cuando detecta que la bandeja está vacía (mayoría de pixeles negros), evitando movimientos del motor sin objeto
 - **Zoom digital**: Acercar/alejar la imagen con teclas `+`/`-` (rango: 1.0x a 3.0x)
 - **Soporte para cámara estéreo**: Extrae automáticamente la vista izquierda o derecha antes de procesar
-- **Indicador visual**: Muestra "✓ STABLE" cuando la clasificación es consistente
+- **Indicador visual**: Muestra "✓ STABLE" cuando la clasificación es consistente y "BANDEJA VACIA" cuando no hay objeto
 
 ### 2. Integración con Arduino
 
@@ -237,6 +240,15 @@ Para reentrenar el modelo, ejecutar secuencialmente:
 - Extrae solo la vista izquierda o derecha antes de procesar
 - Evita problemas de zoom "lateral" en sistemas estéreo
 - Configuración: `stereo_mode='left'` o `'right'` (None para cámara normal)
+
+#### Detección de Bandeja Vacía
+- Analiza el porcentaje de pixeles oscuros en cada frame
+- No clasifica ni envía comandos cuando la bandeja está vacía (fondo negro)
+- Previene movimientos innecesarios del motor
+- Muestra "BANDEJA VACIA - Esperando objeto..." en pantalla
+- Parámetros ajustables:
+  - `black_threshold`: Porcentaje de negro para considerar vacío (default: 0.7 = 70%)
+  - `brightness_threshold`: Brillo máximo para pixel "negro" (default: 40/255)
 
 #### Visualización Mejorada
 - Indicador de estabilidad en pantalla ("✓ STABLE")
