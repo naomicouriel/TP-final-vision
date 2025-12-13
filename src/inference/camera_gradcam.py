@@ -58,7 +58,10 @@ class CameraInferenceWithGradCAM:
         self.zoom_step = 0.1
         self.min_zoom = 1.0
         self.max_zoom = 3.0
-        
+
+        self.square_output = (self.width == self.height)
+
+    
         # Setup Grad-CAM
         if self.enable_gradcam:
             self.gradcam_predictor = GradCAMPredictor(predictor)
@@ -148,6 +151,18 @@ class CameraInferenceWithGradCAM:
         
         return zoomed
     
+    def center_square_crop(self, frame):
+        """Crop frame to centered square (1:1) for display/model if enabled."""
+        if not self.square_output:
+            return frame
+        h, w = frame.shape[:2]
+        if w == h:
+            return frame
+        side = min(w, h)
+        x = (w - side) // 2
+        y = (h - side) // 2
+        return frame[y:y+side, x:x+side]
+    
     def check_stability(self, class_id: int, confidence: float, min_confidence: float = 0.7):
         """
         Check if the prediction has been stable for the required duration.
@@ -221,6 +236,9 @@ class CameraInferenceWithGradCAM:
                 
                 # Apply zoom
                 frame = self.apply_zoom(frame)
+
+                frame = self.center_square_crop(frame)
+
                 
                 # Check if frame is empty (mostly black)
                 is_empty, black_pct, avg_bright = self.is_frame_empty(frame)

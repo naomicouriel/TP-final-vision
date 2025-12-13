@@ -31,6 +31,16 @@ class CameraInference:
         self.cap = None
         self.is_running = False
 
+    def _center_square_crop(self, frame):
+        """Crop frame to a centered square (1:1)."""
+        h, w = frame.shape[:2]
+        if w == h:
+            return frame
+        side = min(w, h)
+        x = (w - side) // 2
+        y = (h - side) // 2
+        return frame[y:y+side, x:x+side]
+
     def start(self):
         """Start camera stream."""
         self.cap = cv2.VideoCapture(self.camera_id)
@@ -71,13 +81,26 @@ class CameraInference:
                     logger.warning("Failed to grab frame")
                     break
                 
-                # Preprocess for display (keep BGR)
+                # # Preprocess for display (keep BGR)
+                # display_frame = frame.copy()
+                
+                # # Run inference (convert to RGB inside predictor)
+                # # We pass the BGR frame directly, predictor handles conversion if numpy array
+                # # Note: predictor.preprocess expects RGB if numpy, so we should convert here
+                # rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+                # Optionally crop to square for display
                 display_frame = frame.copy()
+                if self.square_output:
+                    display_frame = self._center_square_crop(display_frame)
                 
                 # Run inference (convert to RGB inside predictor)
                 # We pass the BGR frame directly, predictor handles conversion if numpy array
                 # Note: predictor.preprocess expects RGB if numpy, so we should convert here
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                rgb_src = frame
+                if self.square_output:
+                    rgb_src = self._center_square_crop(rgb_src)
+                rgb_frame = cv2.cvtColor(rgb_src, cv2.COLOR_BGR2RGB)
                 
                 start_time = time.time()
                 result = self.predictor.predict(rgb_frame)
