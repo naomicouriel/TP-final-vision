@@ -3,7 +3,6 @@ Real-time camera inference module.
 """
 import cv2
 import time
-import numpy as np
 from typing import Callable, Optional
 import logging
 

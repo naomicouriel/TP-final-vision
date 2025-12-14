@@ -45,11 +45,14 @@ El sistema incluye:
 - **`logger.py`**: Sistema de logging
 - **`visualization.py`**: Utilidades para gráficos y visualización
 
-#### `src/arduino_instruction.ino`
+#### `src/arduino/`
 - Código de referencia para Arduino Nano
 - Controla servos para clasificación física de residuos en 4 cuadrantes
 - Comunicación serial USB (9600 baud)
-
+- **`arduino_tester.ino`**: Código de prueba para Arduino
+- **`classification_tester.ino`**: Código de prueba de funcionamiento de coordinación de ambos servos
+- **`serial_instructions.ino`**: Código principal para recibir instrucciones de clasificación desde el PC por serial y mover los servos
+  
 ### `/configs`
 - **`mobilenet_config.yaml`**: Hiperparámetros del modelo y entrenamiento
 

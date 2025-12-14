@@ -5,11 +5,10 @@ Handles dataset downloading, merging, and splitting.
 import os
 import shutil
 import pandas as pd
-import numpy as np
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 import kagglehub
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 import logging
 
 # Configure logging

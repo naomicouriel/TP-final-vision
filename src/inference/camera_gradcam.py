@@ -176,6 +176,12 @@ class CameraInferenceWithGradCAM:
             tuple: (is_stable, stable_class_id) - Whether prediction is stable and which class
         """
         current_time = time.time()
+
+        if class_id == 1:
+            min_confidence = 0.4  # Higher threshold for class 1 (e.g., glass)
+
+        if class_id == 3:
+            min_confidence = 0.8
         
         # Only track high-confidence predictions
         if confidence >= min_confidence:
@@ -277,6 +283,8 @@ class CameraInferenceWithGradCAM:
                     inference_time = 0
                     result = None
                     is_stable = False
+
+                    self.last_sent_class = None  # Reset last sent class on empty frame
                 
                 # Draw results
                 if result is not None:
