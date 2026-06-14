@@ -29,7 +29,8 @@ class CameraInferenceWithGradCAM:
         stability_duration: float = 4.0,  # seconds to wait for stable prediction
         stereo_mode: str = None,  # Options: None, 'left', 'right'
         black_threshold: float = 0.7,  # Percentage of black pixels to consider empty (0-1)
-        brightness_threshold: int = 40  # Max average brightness for black detection (0-255)
+        brightness_threshold: int = 40,  # Max average brightness for black detection (0-255)
+        min_confidence: float = 0.6  # Minimum confidence to consider prediction valid (0-1)
     ):
         self.predictor = predictor
         self.camera_id = camera_id
@@ -49,6 +50,7 @@ class CameraInferenceWithGradCAM:
         
         # Stability tracking for Arduino
         self.stability_duration = stability_duration
+        self.min_confidence = min_confidence  # Confidence threshold
         self.prediction_history = deque(maxlen=100)  # Keep last 100 predictions
         self.last_stable_class = None
         self.last_sent_class = None
@@ -176,15 +178,15 @@ class CameraInferenceWithGradCAM:
             tuple: (is_stable, stable_class_id) - Whether prediction is stable and which class
         """
         current_time = time.time()
-
-        if class_id == 1:
-            min_confidence = 0.4  # Higher threshold for class 1 (e.g., glass)
-
-        if class_id == 3:
-            min_confidence = 0.8
+        
+        # Adjust confidence threshold for specific classes
+        # Ecoglasses (class_id=1) are harder to detect, use lower threshold
+        adjusted_confidence = min_confidence
+        if class_id == 1:  # ecoglasses
+            adjusted_confidence = min(min_confidence, 0.45)  # Use 0.45 or lower if min_confidence is already low
         
         # Only track high-confidence predictions
-        if confidence >= min_confidence:
+        if confidence >= adjusted_confidence:
             self.prediction_history.append((current_time, class_id))
         
         # Remove old predictions outside stability window
@@ -271,20 +273,20 @@ class CameraInferenceWithGradCAM:
                     # Check stability and call process_frame for custom behavior
                     class_id = result['class_id']
                     confidence = result['confidence']
-                    is_stable, stable_class = self.check_stability(class_id, confidence)
+                    is_stable, stable_class = self.check_stability(class_id, confidence, self.min_confidence)
                     
                     # Call custom process_frame (for Arduino integration)
                     if is_stable and stable_class is not None:
                         result['stable_class'] = stable_class
                         self.process_frame(result)
                 else:
-                    # Frame is empty - skip inference
+                    # Frame is empty - skip inference and reset state
                     display_frame = frame.copy()
                     inference_time = 0
                     result = None
                     is_stable = False
-
-                    self.last_sent_class = None  # Reset last sent class on empty frame
+                    # Reset last_sent_class to allow same class detection after empty tray
+                    self.last_sent_class = None
                 
                 # Draw results
                 if result is not None:

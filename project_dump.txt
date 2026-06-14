@@ -1,0 +1,3841 @@
+--- PROJECT STRUCTURE (`tree -L 3 -a -I ...`) ---
+```text
+.
+├── .gitattributes
+├── .gitignore
+├── analyze_ecoglasses_predictions.py
+├── batch_predict.py
+├── configs
+│   └── mobilenet_config.yaml
+├── convert_heic_images.py
+├── data
+│   ├── custom
+│   │   ├── ecoglasses
+│   │   ├── ecoglasses_bandeja
+│   │   └── ecoglasses_bandeja_jpg
+│   ├── processed
+│   │   ├── test.csv
+│   │   ├── train
+│   │   ├── train.csv
+│   │   ├── val
+│   │   └── val.csv
+│   └── raw
+│       └── Garbage_Dataset_Classification
+├── ecoglasses_bandeja_predictions.csv
+├── ECOGLASSES_PREDICTION_GUIDE.md
+├── ECOGLASSES_QUICKSTART.md
+├── finetune_ecoglasses_simple.py
+├── finetune_ecoglasses.py
+├── generate_notebooks.py
+├── gradcam_analysis.png
+├── GRADCAM_GUIDE.md
+├── metrics_epochs.png
+├── notebooks
+│   ├── 01_data_preparation.ipynb
+│   ├── 02_train_mobilenet.ipynb
+│   ├── 03_inference_demo.ipynb
+│   ├── 04_final_pipeline.ipynb
+│   ├── gradcam_analysis.png
+│   └── outputs
+│       └── logs
+├── OLD_tp_final_pipeline.ipynb
+├── outputs
+│   ├── checkpoints
+│   │   ├── best_model_finetuned.pt
+│   │   ├── best_model.pt
+│   │   └── finetuning_history.json
+│   ├── exports
+│   │   ├── mobilenet_ts.pt
+│   │   ├── mobilenet.onnx
+│   │   └── mobilenet.onnx.data
+│   └── logs
+├── prediction_visualization.png
+├── PROJECT_REPORT.md
+├── README.md
+├── REALTIME_DETECTION_GUIDE.md
+├── sample_batch.png
+├── src
+│   ├── __init__.py
+│   ├── arduino_instruction.ino
+│   ├── data
+│   │   ├── __init__.py
+│   │   ├── augmentation.py
+│   │   ├── dataset.py
+│   │   └── preprocessing.py
+│   ├── inference
+│   │   ├── camera_gradcam.py
+│   │   ├── camera.py
+│   │   ├── gradcam.py
+│   │   └── predictor.py
+│   ├── models
+│   │   ├── __init__.py
+│   │   └── mobilenet.py
+│   ├── training
+│   │   ├── __init__.py
+│   │   ├── callbacks.py
+│   │   ├── losses.py
+│   │   ├── metrics.py
+│   │   └── trainer.py
+│   └── utils
+│       ├── config.py
+│       ├── logger.py
+│       └── visualization.py
+├── test_ecoglasses_prediction.py
+├── test_finetuned_model.py
+├── tests
+├── utils
+└── visualize_predictions.py
+
+27 directories, 58 files
+```
+
+========================================
+
+
+--- START FILE: analyze_ecoglasses_predictions.py ---
+
+```python
+"""
+Comprehensive prediction analysis for ecoglasses_bandeja images.
+"""
+from pathlib import Path
+from src.inference.predictor import RecyclingPredictor
+import numpy as np
+from collections import Counter
+
+def main():
+    # Class mapping (alphabetically sorted as created during training)
+    class_mapping = {
+        0: 'cardboard_paper',
+        1: 'ecoglasses',
+        2: 'metal_plastic',
+        3: 'trash'
+    }
+    
+    # Initialize predictor
+    print("Loading model...")
+    predictor = RecyclingPredictor(
+        model_path='outputs/checkpoints/best_model.pt',
+        num_classes=4,
+        architecture='mobilenet_v3_large',
+        device='cpu',  # Change to 'cuda' if you have GPU
+        class_mapping=class_mapping
+    )
+    print("Model loaded successfully!\n")
+    
+    # Get ecoglasses images
+    ecoglasses_dir = Path('data/custom/ecoglasses_bandeja_jpg')
+    image_files = sorted(list(ecoglasses_dir.glob('*.jpg')))
+    
+    if not image_files:
+        print(f"No .jpg images found in {ecoglasses_dir}")
+        print("Run convert_heic_images.py first to convert HEIC files")
+        return
+    
+    print(f"Found {len(image_files)} ecoglasses images")
+    print("Running predictions on all images...\n")
+    
+    # Collect results
+    predictions = []
+    confidences = []
+    all_probs = []
+    
+    for i, img_path in enumerate(image_files, 1):
+        try:
+            result = predictor.predict(str(img_path))
+            
+            predicted_class = result['class_name']
+            confidence = result['confidence']
+            
+            predictions.append(predicted_class)
+            confidences.append(confidence)
+            all_probs.append(result['probabilities'])
+            
+            # Print progress every 10 images
+            if i % 10 == 0 or i == len(image_files):
+                print(f"Processed {i}/{len(image_files)} images...")
+            
+        except Exception as e:
+            print(f"Error processing {img_path.name}: {e}")
+            continue
+    
+    # Analysis
+    print("\n" + "="*60)
+    print("PREDICTION ANALYSIS")
+    print("="*60)
+    
+    # Count predictions
+    prediction_counts = Counter(predictions)
+    total = len(predictions)
+    
+    print(f"\nTotal images analyzed: {total}")
+    print("\nPrediction distribution:")
+    for class_name in ['ecoglasses', 'cardboard_paper', 'metal_plastic', 'trash']:
+        count = prediction_counts[class_name]
+        percentage = (count / total) * 100
+        print(f"  {class_name:20s}: {count:3d} ({percentage:5.1f}%)")
+    
+    # Ecoglasses specific analysis
+    ecoglasses_count = prediction_counts['ecoglasses']
+    ecoglasses_accuracy = (ecoglasses_count / total) * 100
+    
+    print("\n" + "-"*60)
+    print(f"Ecoglasses Detection Rate: {ecoglasses_count}/{total} ({ecoglasses_accuracy:.1f}%)")
+    print("-"*60)
+    
+    # Confidence analysis for ecoglasses predictions
+    ecoglasses_confidences = [conf for pred, conf in zip(predictions, confidences) if pred == 'ecoglasses']
+    if ecoglasses_confidences:
+        print(f"\nEcoglasses prediction confidence:")
+        print(f"  Mean:   {np.mean(ecoglasses_confidences):.3f}")
+        print(f"  Median: {np.median(ecoglasses_confidences):.3f}")
+        print(f"  Min:    {np.min(ecoglasses_confidences):.3f}")
+        print(f"  Max:    {np.max(ecoglasses_confidences):.3f}")
+    
+    # Misclassified images analysis
+    misclassified = [(img_path.name, pred, conf) 
+                     for img_path, pred, conf in zip(image_files, predictions, confidences) 
+                     if pred != 'ecoglasses']
+    
+    if misclassified:
+        print(f"\n\nImages NOT classified as ecoglasses ({len(misclassified)}):")
+        print("-"*60)
+        for img_name, pred, conf in misclassified[:10]:  # Show first 10
+            print(f"  {img_name:25s} → {pred:20s} (conf: {conf:.3f})")
+        if len(misclassified) > 10:
+            print(f"  ... and {len(misclassified) - 10} more")
+    
+    # Average probabilities across all images
+    all_probs_array = np.array(all_probs)
+    avg_probs = np.mean(all_probs_array, axis=0)
+    
+    print(f"\n\nAverage class probabilities across all images:")
+    print("-"*60)
+    for class_id, avg_prob in enumerate(avg_probs):
+        class_name = class_mapping[class_id]
+        print(f"  {class_name:20s}: {avg_prob:.3f}")
+    
+    print("\n" + "="*60)
+    print("\n✅ Good news! Your model already knows ecoglasses!")
+    print("   No retraining needed - it was part of the original training.")
+    
+    if ecoglasses_accuracy >= 70:
+        print(f"\n✅ The model performs well on your bandeja images ({ecoglasses_accuracy:.1f}% accuracy).")
+    elif ecoglasses_accuracy >= 50:
+        print(f"\n⚠️  Moderate accuracy ({ecoglasses_accuracy:.1f}%). Consider:")
+        print("   - The bandeja images may look different from training images")
+        print("   - Fine-tuning on a few bandeja images could improve accuracy")
+    else:
+        print(f"\n⚠️  Lower accuracy ({ecoglasses_accuracy:.1f}%). The model struggles because:")
+        print("   - Bandeja images may be visually different from training data")
+        print("   - Consider fine-tuning with some bandeja images")
+    
+    print("\n" + "="*60)
+
+if __name__ == "__main__":
+    main()
+```
+
+--- END FILE: analyze_ecoglasses_predictions.py ---
+
+--- START FILE: batch_predict.py ---
+
+```python
+"""
+Batch prediction script for ecoglasses images.
+Saves predictions to a CSV file for easy review.
+"""
+from pathlib import Path
+from src.inference.predictor import RecyclingPredictor
+import pandas as pd
+from datetime import datetime
+import argparse
+
+def predict_and_save(
+    input_dir: str,
+    output_csv: str = None,
+    model_path: str = 'outputs/checkpoints/best_model.pt',
+    device: str = 'cpu'
+):
+    """
+    Run predictions on all images in a directory and save to CSV.
+    
+    Args:
+        input_dir: Directory containing images to predict
+        output_csv: Output CSV path (default: auto-generated)
+        model_path: Path to model checkpoint
+        device: Device to use ('cpu' or 'cuda')
+    """
+    # Auto-generate output filename if not provided
+    if output_csv is None:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_csv = f'predictions_{timestamp}.csv'
+    
+    # Class mapping
+    class_mapping = {
+        0: 'cardboard_paper',
+        1: 'ecoglasses',
+        2: 'metal_plastic',
+        3: 'trash'
+    }
+    
+    # Initialize predictor
+    print(f"Loading model from {model_path}...")
+    predictor = RecyclingPredictor(
+        model_path=model_path,
+        num_classes=4,
+        architecture='mobilenet_v3_large',
+        device=device,
+        class_mapping=class_mapping
+    )
+    print("Model loaded!\n")
+    
+    # Get images
+    input_path = Path(input_dir)
+    image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.JPG', '*.JPEG', '*.PNG']
+    image_files = []
+    for ext in image_extensions:
+        image_files.extend(input_path.glob(ext))
+    
+    image_files = sorted(image_files)
+    
+    if not image_files:
+        print(f"No images found in {input_dir}")
+        print(f"Supported formats: {', '.join(image_extensions)}")
+        return
+    
+    print(f"Found {len(image_files)} images")
+    print(f"Running predictions...\n")
+    
+    # Run predictions
+    results = []
+    
+    for i, img_path in enumerate(image_files, 1):
+        try:
+            result = predictor.predict(str(img_path))
+            
+            # Create result row
+            row = {
+                'filename': img_path.name,
+                'filepath': str(img_path),
+                'predicted_class': result['class_name'],
+                'confidence': result['confidence'],
+                'prob_cardboard_paper': result['probabilities'][0],
+                'prob_ecoglasses': result['probabilities'][1],
+                'prob_metal_plastic': result['probabilities'][2],
+                'prob_trash': result['probabilities'][3],
+            }
+            results.append(row)
+            
+            # Progress indicator
+            if i % 10 == 0 or i == len(image_files):
+                print(f"  Processed {i}/{len(image_files)} images...")
+            
+        except Exception as e:
+            print(f"Error processing {img_path.name}: {e}")
+            continue
+    
+    # Save to CSV
+    df = pd.DataFrame(results)
+    df.to_csv(output_csv, index=False)
+    
+    print(f"\n✅ Predictions saved to: {output_csv}")
+    
+    # Print summary
+    print("\nPrediction Summary:")
+    print("-" * 50)
+    summary = df['predicted_class'].value_counts()
+    for class_name, count in summary.items():
+        percentage = (count / len(df)) * 100
+        avg_conf = df[df['predicted_class'] == class_name]['confidence'].mean()
+        print(f"  {class_name:20s}: {count:3d} ({percentage:5.1f}%) - avg conf: {avg_conf:.3f}")
+    
+    print("\nTop 5 most confident predictions:")
+    print("-" * 50)
+    top5 = df.nlargest(5, 'confidence')
+    for _, row in top5.iterrows():
+        print(f"  {row['filename']:30s} → {row['predicted_class']:15s} ({row['confidence']:.3f})")
+    
+    print("\nTop 5 least confident predictions:")
+    print("-" * 50)
+    bottom5 = df.nsmallest(5, 'confidence')
+    for _, row in bottom5.iterrows():
+        print(f"  {row['filename']:30s} → {row['predicted_class']:15s} ({row['confidence']:.3f})")
+    
+    print(f"\n📊 Full results available in: {output_csv}")
+
+def main():
+    parser = argparse.ArgumentParser(description='Batch prediction for recycling classification')
+    parser.add_argument('input_dir', type=str, help='Directory containing images to predict')
+    parser.add_argument('--output', '-o', type=str, default=None, 
+                       help='Output CSV path (default: auto-generated)')
+    parser.add_argument('--model', '-m', type=str, 
+                       default='outputs/checkpoints/best_model.pt',
+                       help='Model checkpoint path')
+    parser.add_argument('--device', '-d', type=str, default='cpu',
+                       choices=['cpu', 'cuda'],
+                       help='Device to use for inference')
+    
+    args = parser.parse_args()
+    
+    predict_and_save(
+        input_dir=args.input_dir,
+        output_csv=args.output,
+        model_path=args.model,
+        device=args.device
+    )
+
+if __name__ == "__main__":
+    main()
+```
+
+--- END FILE: batch_predict.py ---
+
+--- START FILE: convert_heic_images.py ---
+
+```python
+"""
+Convert HEIC images to JPG format for model prediction.
+"""
+from pathlib import Path
+import subprocess
+import sys
+
+def convert_heic_to_jpg(input_dir: str, output_dir: str, max_images: int = None):
+    """
+    Convert HEIC images to JPG using macOS's sips command.
+    
+    Args:
+        input_dir: Directory containing HEIC images
+        output_dir: Directory to save JPG images
+        max_images: Maximum number of images to convert (None = all)
+    """
+    input_path = Path(input_dir)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    heic_files = list(input_path.glob('*.heic'))
+    
+    if not heic_files:
+        print(f"No HEIC files found in {input_dir}")
+        return
+    
+    print(f"Found {len(heic_files)} HEIC files")
+    
+    if max_images:
+        heic_files = heic_files[:max_images]
+        print(f"Converting first {max_images} images...")
+    else:
+        print(f"Converting all {len(heic_files)} images...")
+    
+    converted = 0
+    failed = 0
+    
+    for heic_file in heic_files:
+        jpg_file = output_path / f"{heic_file.stem}.jpg"
+        
+        try:
+            # Use macOS sips command to convert
+            result = subprocess.run(
+                ['sips', '-s', 'format', 'jpeg', str(heic_file), '--out', str(jpg_file)],
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode == 0:
+                converted += 1
+                if converted <= 5 or converted % 10 == 0:
+                    print(f"  ✓ Converted: {heic_file.name} -> {jpg_file.name}")
+            else:
+                failed += 1
+                print(f"  ✗ Failed: {heic_file.name}")
+                print(f"    Error: {result.stderr}")
+                
+        except Exception as e:
+            failed += 1
+            print(f"  ✗ Error converting {heic_file.name}: {e}")
+    
+    print(f"\nConversion complete!")
+    print(f"  Successful: {converted}")
+    print(f"  Failed: {failed}")
+    print(f"  Output directory: {output_path}")
+    
+    return output_path
+
+if __name__ == "__main__":
+    input_dir = "data/custom/ecoglasses_bandeja"
+    output_dir = "data/custom/ecoglasses_bandeja_jpg"
+    
+    # Convert all images
+    convert_heic_to_jpg(input_dir, output_dir)
+```
+
+--- END FILE: convert_heic_images.py ---
+
+--- START FILE: finetune_ecoglasses.py ---
+
+```python
+"""
+Fine-tune the model on ecoglasses_bandeja images to improve prediction accuracy.
+
+This script demonstrates transfer learning / fine-tuning without full retraining:
+1. Load the pre-trained model
+2. Freeze early layers (feature extraction)
+3. Train only the final classification layer on new data
+4. Use a small learning rate to preserve learned features
+
+This is MUCH faster than full retraining (minutes vs. hours).
+"""
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+from pathlib import Path
+import cv2
+import numpy as np
+from typing import List, Tuple
+import json
+
+from src.models.mobilenet import MobileNetClassifier
+from src.data.augmentation import get_train_transforms, get_inference_transforms
+
+class SimpleImageDataset(Dataset):
+    """Simple dataset for fine-tuning."""
+    
+    def __init__(self, image_paths: List[Path], labels: List[int], transforms=None):
+        self.image_paths = image_paths
+        self.labels = labels
+        self.transforms = transforms
+    
+    def __len__(self):
+        return len(self.image_paths)
+    
+    def __getitem__(self, idx):
+        img_path = self.image_paths[idx]
+        image = cv2.imread(str(img_path))
+        
+        if image is None:
+            raise ValueError(f"Failed to load image: {img_path}")
+        
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        if self.transforms:
+            transformed = self.transforms(image=image)
+            image = transformed['image']
+        
+        label = self.labels[idx]
+        return image, label
+
+def prepare_finetuning_data(
+    ecoglasses_dir: str,
+    other_classes_data: dict,
+    train_ratio: float = 0.8
+) -> Tuple[DataLoader, DataLoader]:
+    """
+    Prepare data for fine-tuning.
+    
+    Args:
+        ecoglasses_dir: Directory with new ecoglasses images
+        other_classes_data: Dict with paths for other classes (to maintain balance)
+        train_ratio: Ratio for train/val split
+    """
+    from sklearn.model_selection import train_test_split
+    
+    # Class mapping
+    class_to_idx = {
+        'cardboard_paper': 0,
+        'ecoglasses': 1,
+        'metal_plastic': 2,
+        'trash': 3
+    }
+    
+    all_images = []
+    all_labels = []
+    
+    # Add ecoglasses images
+    ecoglasses_path = Path(ecoglasses_dir)
+    ecoglasses_images = list(ecoglasses_path.glob('*.jpg'))
+    
+    # Filter out any non-existent files
+    ecoglasses_images = [img for img in ecoglasses_images if img.exists()]
+    
+    all_images.extend(ecoglasses_images)
+    all_labels.extend([class_to_idx['ecoglasses']] * len(ecoglasses_images))
+    
+    print(f"Loaded {len(ecoglasses_images)} ecoglasses images")
+    
+    # Add some images from other classes for balance
+    for class_name, image_paths in other_classes_data.items():
+        if class_name in class_to_idx:
+            # Filter out non-existent files
+            valid_paths = [p for p in image_paths if Path(p).exists()]
+            
+            if len(valid_paths) == 0:
+                print(f"Warning: No valid images found for class {class_name}")
+                continue
+                
+            num_samples = min(len(valid_paths), len(ecoglasses_images) // 2)
+            sampled_paths = np.random.choice(valid_paths, num_samples, replace=False)
+            all_images.extend(sampled_paths)
+            all_labels.extend([class_to_idx[class_name]] * num_samples)
+            print(f"Loaded {num_samples} {class_name} images")
+    
+    # Split train/val
+    train_imgs, val_imgs, train_labels, val_labels = train_test_split(
+        all_images, all_labels, train_size=train_ratio, random_state=42, stratify=all_labels
+    )
+    
+    # Create datasets
+    train_dataset = SimpleImageDataset(train_imgs, train_labels, get_train_transforms())
+    val_dataset = SimpleImageDataset(val_imgs, val_labels, get_inference_transforms())
+    
+    # Create dataloaders - set num_workers=0 to avoid multiprocessing issues
+    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=0)
+    
+    print(f"\nDataset prepared:")
+    print(f"  Training samples: {len(train_dataset)}")
+    print(f"  Validation samples: {len(val_dataset)}")
+    
+    return train_loader, val_loader
+
+def fine_tune_model(
+    model_path: str,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    num_epochs: int = 10,
+    learning_rate: float = 0.0001,
+    device: str = 'cpu'
+):
+    """
+    Fine-tune the model on new data.
+    
+    Args:
+        model_path: Path to pre-trained model
+        train_loader: Training data loader
+        val_loader: Validation data loader
+        num_epochs: Number of epochs to train
+        learning_rate: Learning rate (small for fine-tuning)
+        device: Device to train on
+    """
+    # Load pre-trained model
+    print("\nLoading pre-trained model...")
+    model = MobileNetClassifier(
+        num_classes=4,
+        architecture='mobilenet_v3_large',
+        pretrained=False
+    )
+    
+    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+    if 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+    else:
+        model.load_state_dict(checkpoint)
+    
+    model.to(device)
+    
+    # Freeze early layers - only train the classifier
+    print("Freezing feature extraction layers...")
+    for name, param in model.named_parameters():
+        if 'classifier' not in name and 'fc' not in name:
+            param.requires_grad = False
+        else:
+            param.requires_grad = True
+            print(f"  Training: {name}")
+    
+    # Setup training
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), 
+                          lr=learning_rate)
+    
+    best_val_acc = 0.0
+    history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
+    
+    print(f"\nStarting fine-tuning for {num_epochs} epochs...")
+    print("="*60)
+    
+    for epoch in range(num_epochs):
+        # Training phase
+        model.train()
+        train_loss = 0.0
+        train_correct = 0
+        train_total = 0
+        
+        for images, labels in train_loader:
+            images, labels = images.to(device), labels.to(device)
+            
+            optimizer.zero_grad()
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            
+            train_loss += loss.item()
+            _, predicted = outputs.max(1)
+            train_total += labels.size(0)
+            train_correct += predicted.eq(labels).sum().item()
+        
+        train_loss = train_loss / len(train_loader)
+        train_acc = 100. * train_correct / train_total
+        
+        # Validation phase
+        model.eval()
+        val_loss = 0.0
+        val_correct = 0
+        val_total = 0
+        
+        with torch.no_grad():
+            for images, labels in val_loader:
+                images, labels = images.to(device), labels.to(device)
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+                
+                val_loss += loss.item()
+                _, predicted = outputs.max(1)
+                val_total += labels.size(0)
+                val_correct += predicted.eq(labels).sum().item()
+        
+        val_loss = val_loss / len(val_loader)
+        val_acc = 100. * val_correct / val_total
+        
+        # Save history
+        history['train_loss'].append(train_loss)
+        history['train_acc'].append(train_acc)
+        history['val_loss'].append(val_loss)
+        history['val_acc'].append(val_acc)
+        
+        print(f"Epoch {epoch+1}/{num_epochs}")
+        print(f"  Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%")
+        print(f"  Val Loss:   {val_loss:.4f} | Val Acc:   {val_acc:.2f}%")
+        
+        # Save best model
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            output_path = 'outputs/checkpoints/best_model_finetuned.pt'
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'val_acc': val_acc,
+            }, output_path)
+            print(f"  ✓ Saved best model (val_acc: {val_acc:.2f}%)")
+        
+        print()
+    
+    print("="*60)
+    print(f"Fine-tuning complete! Best validation accuracy: {best_val_acc:.2f}%")
+    print(f"Fine-tuned model saved to: outputs/checkpoints/best_model_finetuned.pt")
+    
+    # Save training history
+    with open('outputs/checkpoints/finetuning_history.json', 'w') as f:
+        json.dump(history, f, indent=2)
+    
+    return model, history
+
+def get_sample_images_from_training_data(csv_path: str, num_per_class: int = 50) -> dict:
+    """Get sample images from training data for balancing."""
+    import pandas as pd
+    
+    df = pd.read_csv(csv_path)
+    
+    samples = {}
+    for class_name in ['cardboard_paper', 'metal_plastic', 'trash']:
+        class_df = df[df['label'] == class_name]
+        sample_df = class_df.sample(n=min(num_per_class, len(class_df)), random_state=42)
+        # Convert relative paths to absolute paths
+        samples[class_name] = [Path(f).resolve() for f in sample_df['filename'].values]
+    
+    return samples
+
+def main():
+    print("="*60)
+    print("FINE-TUNING MOBILENET ON ECOGLASSES_BANDEJA")
+    print("="*60)
+    print("\nThis will:")
+    print("  1. Load your pre-trained model")
+    print("  2. Freeze feature extraction layers")
+    print("  3. Train only the classifier on new data")
+    print("  4. Take ~5-10 minutes (much faster than full retraining!)")
+    print()
+    
+    # Prepare data
+    print("Preparing data...")
+    other_classes_data = get_sample_images_from_training_data(
+        'data/processed/train.csv',
+        num_per_class=50
+    )
+    
+    train_loader, val_loader = prepare_finetuning_data(
+        ecoglasses_dir='data/custom/ecoglasses_bandeja_jpg',
+        other_classes_data=other_classes_data,
+        train_ratio=0.8
+    )
+    
+    # Fine-tune
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"\nUsing device: {device}")
+    
+    model, history = fine_tune_model(
+        model_path='outputs/checkpoints/best_model.pt',
+        train_loader=train_loader,
+        val_loader=val_loader,
+        num_epochs=10,
+        learning_rate=0.0001,
+        device=device
+    )
+    
+    print("\n✅ Fine-tuning complete!")
+    print("\nNext steps:")
+    print("  1. Test the fine-tuned model:")
+    print("     python test_finetuned_model.py")
+    print("\n  2. If satisfied, replace the original model:")
+    print("     cp outputs/checkpoints/best_model_finetuned.pt outputs/checkpoints/best_model.pt")
+
+if __name__ == "__main__":
+    main()
+```
+
+--- END FILE: finetune_ecoglasses.py ---
+
+--- START FILE: finetune_ecoglasses_simple.py ---
+
+```python
+"""
+Simplified fine-tuning script that focuses on improving ecoglasses detection
+by training only on ecoglasses images using a one-vs-all approach.
+"""
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+from pathlib import Path
+import cv2
+import numpy as np
+from typing import List
+import json
+
+from src.models.mobilenet import MobileNetClassifier
+from src.data.augmentation import get_train_transforms, get_inference_transforms
+
+class SimpleImageDataset(Dataset):
+    """Simple dataset for fine-tuning."""
+    
+    def __init__(self, image_paths: List[Path], labels: List[int], transforms=None):
+        self.image_paths = image_paths
+        self.labels = labels
+        self.transforms = transforms
+    
+    def __len__(self):
+        return len(self.image_paths)
+    
+    def __getitem__(self, idx):
+        img_path = self.image_paths[idx]
+        image = cv2.imread(str(img_path))
+        
+        if image is None:
+            raise ValueError(f"Failed to load image: {img_path}")
+        
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        if self.transforms:
+            transformed = self.transforms(image=image)
+            image = transformed['image']
+        
+        label = self.labels[idx]
+        return image, label
+
+def prepare_ecoglasses_only_data(ecoglasses_dir: str, train_ratio: float = 0.8):
+    """
+    Prepare data using only ecoglasses images.
+    """
+    from sklearn.model_selection import train_test_split
+    
+    # Get ecoglasses images
+    ecoglasses_path = Path(ecoglasses_dir)
+    ecoglasses_images = sorted(list(ecoglasses_path.glob('*.jpg')))
+    
+    if not ecoglasses_images:
+        raise ValueError(f"No images found in {ecoglasses_dir}")
+    
+    # All are ecoglasses (class index 1)
+    all_labels = [1] * len(ecoglasses_images)  # 1 = ecoglasses
+    
+    print(f"Loaded {len(ecoglasses_images)} ecoglasses images")
+    
+    # Split train/val
+    train_imgs, val_imgs, train_labels, val_labels = train_test_split(
+        ecoglasses_images, all_labels, train_size=train_ratio, random_state=42
+    )
+    
+    # Create datasets with strong augmentation for training
+    train_dataset = SimpleImageDataset(train_imgs, train_labels, get_train_transforms())
+    val_dataset = SimpleImageDataset(val_imgs, val_labels, get_inference_transforms())
+    
+    # Create dataloaders
+    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_dataset, batch_size=8, shuffle=False, num_workers=0)
+    
+    print(f"\nDataset prepared:")
+    print(f"  Training samples: {len(train_dataset)}")
+    print(f"  Validation samples: {len(val_dataset)}")
+    
+    return train_loader, val_loader
+
+def fine_tune_model(
+    model_path: str,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    num_epochs: int = 15,
+    learning_rate: float = 0.00005,
+    device: str = 'cpu'
+):
+    """
+    Fine-tune the model focusing on ecoglasses recognition.
+    """
+    # Load pre-trained model
+    print("\nLoading pre-trained model...")
+    model = MobileNetClassifier(
+        num_classes=4,
+        architecture='mobilenet_v3_large',
+        pretrained=False
+    )
+    
+    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+    if 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+    else:
+        model.load_state_dict(checkpoint)
+    
+    model.to(device)
+    
+    # Only train the last layers of the classifier
+    print("Freezing most layers, training only final classifier layers...")
+    for name, param in model.named_parameters():
+        # Freeze everything except the final classifier
+        if 'classifier.3' in name:  # Only train the final linear layer
+            param.requires_grad = True
+            print(f"  Training: {name}")
+        else:
+            param.requires_grad = False
+    
+    # Use weighted loss to emphasize ecoglasses
+    # Create a weight vector that gives more importance to ecoglasses
+    class_weights = torch.FloatTensor([1.0, 3.0, 1.0, 1.0]).to(device)  # Higher weight for ecoglasses
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    
+    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), 
+                          lr=learning_rate)
+    
+    best_val_acc = 0.0
+    history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
+    
+    print(f"\nStarting fine-tuning for {num_epochs} epochs...")
+    print(f"Learning rate: {learning_rate}")
+    print("="*60)
+    
+    for epoch in range(num_epochs):
+        # Training phase
+        model.train()
+        train_loss = 0.0
+        train_correct = 0
+        train_total = 0
+        
+        for images, labels in train_loader:
+            images, labels = images.to(device), labels.to(device)
+            
+            optimizer.zero_grad()
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            
+            train_loss += loss.item()
+            _, predicted = outputs.max(1)
+            train_total += labels.size(0)
+            train_correct += predicted.eq(labels).sum().item()
+        
+        train_loss = train_loss / len(train_loader)
+        train_acc = 100. * train_correct / train_total
+        
+        # Validation phase
+        model.eval()
+        val_loss = 0.0
+        val_correct = 0
+        val_total = 0
+        
+        with torch.no_grad():
+            for images, labels in val_loader:
+                images, labels = images.to(device), labels.to(device)
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+                
+                val_loss += loss.item()
+                _, predicted = outputs.max(1)
+                val_total += labels.size(0)
+                val_correct += predicted.eq(labels).sum().item()
+        
+        val_loss = val_loss / len(val_loader)
+        val_acc = 100. * val_correct / val_total
+        
+        # Save history
+        history['train_loss'].append(train_loss)
+        history['train_acc'].append(train_acc)
+        history['val_loss'].append(val_loss)
+        history['val_acc'].append(val_acc)
+        
+        print(f"Epoch {epoch+1}/{num_epochs}")
+        print(f"  Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%")
+        print(f"  Val Loss:   {val_loss:.4f} | Val Acc:   {val_acc:.2f}%")
+        
+        # Save best model
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            output_path = 'outputs/checkpoints/best_model_finetuned.pt'
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'val_acc': val_acc,
+            }, output_path)
+            print(f"  ✓ Saved best model (val_acc: {val_acc:.2f}%)")
+        
+        print()
+    
+    print("="*60)
+    print(f"Fine-tuning complete! Best validation accuracy: {best_val_acc:.2f}%")
+    print(f"Fine-tuned model saved to: outputs/checkpoints/best_model_finetuned.pt")
+    
+    # Save training history
+    with open('outputs/checkpoints/finetuning_history.json', 'w') as f:
+        json.dump(history, f, indent=2)
+    
+    return model, history
+
+def main():
+    print("="*60)
+    print("FINE-TUNING FOR ECOGLASSES RECOGNITION")
+    print("="*60)
+    print("\nThis script will:")
+    print("  1. Load your pre-trained model")
+    print("  2. Train only the final layer on ecoglasses images")
+    print("  3. Use weighted loss to boost ecoglasses recognition")
+    print("  4. Take ~5 minutes")
+    print()
+    
+    # Prepare data
+    print("Preparing ecoglasses data...")
+    train_loader, val_loader = prepare_ecoglasses_only_data(
+        ecoglasses_dir='data/custom/ecoglasses_bandeja_jpg',
+        train_ratio=0.8
+    )
+    
+    # Fine-tune
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"\nUsing device: {device}")
+    
+    model, history = fine_tune_model(
+        model_path='outputs/checkpoints/best_model.pt',
+        train_loader=train_loader,
+        val_loader=val_loader,
+        num_epochs=15,
+        learning_rate=0.00005,
+        device=device
+    )
+    
+    print("\n✅ Fine-tuning complete!")
+    print("\nNext steps:")
+    print("  1. Test the fine-tuned model:")
+    print("     python test_finetuned_model.py")
+    print("\n  2. If results are better, use the fine-tuned model:")
+    print("     cp outputs/checkpoints/best_model_finetuned.pt outputs/checkpoints/best_model.pt")
+    print("\n  3. Then test in your notebook with real-time camera!")
+
+if __name__ == "__main__":
+    main()
+```
+
+--- END FILE: finetune_ecoglasses_simple.py ---
+
+--- START FILE: generate_notebooks.py ---
+
+```python
+import json
+import os
+
+def create_notebook(cells, filename):
+    notebook = {
+        "cells": cells,
+        "metadata": {
+            "kernelspec": {
+                "display_name": "Python 3",
+                "language": "python",
+                "name": "python3"
+            },
+            "language_info": {
+                "codemirror_mode": {
+                    "name": "ipython",
+                    "version": 3
+                },
+                "file_extension": ".py",
+                "mimetype": "text/x-python",
+                "name": "python",
+                "nbconvert_exporter": "python",
+                "pygments_lexer": "ipython3",
+                "version": "3.8.10"
+            }
+        },
+        "nbformat": 4,
+        "nbformat_minor": 5
+    }
+    
+    with open(filename, 'w') as f:
+        json.dump(notebook, f, indent=2)
+    print(f"Created {filename}")
+
+def code_cell(source):
+    return {
+        "cell_type": "code",
+        "execution_count": None,
+        "metadata": {},
+        "outputs": [],
+        "source": source.strip().split('\n')
+    }
+
+def markdown_cell(source):
+    return {
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": source.strip().split('\n')
+    }
+
+# ---------------------------------------------------------
+# 01_data_preparation.ipynb
+# ---------------------------------------------------------
+cells_01 = [
+    markdown_cell("# Data Preparation\n\nThis notebook handles downloading the dataset, merging custom data, and creating train/val/test splits."),
+    code_cell("""
+import sys
+import os
+from pathlib import Path
+
+# Add project root to path
+project_root = Path('..').resolve()
+if str(project_root) not in sys.path:
+    sys.path.append(str(project_root))
+
+from src.data.preprocessing import download_kaggle_dataset, create_dataset_csv
+from src.utils.config import Config
+"""),
+    markdown_cell("## 1. Load Configuration"),
+    code_cell("""
+config = Config('../configs/mobilenet_config.yaml')
+print("Configuration loaded.")
+"""),
+    markdown_cell("## 2. Download Kaggle Dataset"),
+    code_cell("""
+# Download dataset
+dataset_name = config.data.get('kaggle_dataset')
+raw_dir = Path('../data/raw')
+
+print(f"Downloading {dataset_name}...")
+download_kaggle_dataset(dataset_name, str(raw_dir))
+"""),
+    markdown_cell("## 3. Create Splits (Train/Val/Test)\n\nThis step merges the Kaggle dataset with your custom ecoglasses (if any) and creates the CSV files."),
+    code_cell("""
+# Define paths
+custom_dir = Path('../') / config.data.get('custom_ecoglasses_folder')
+output_dir = Path('../') / config.data.get('processed_dir')
+class_mapping = config.get('class_mapping')
+split_ratios = config.data.get('split_ratios')
+
+# Create CSVs
+train_csv, val_csv, test_csv = create_dataset_csv(
+    raw_data_dir=raw_dir,
+    custom_data_dir=custom_dir,
+    output_dir=output_dir,
+    class_mapping=class_mapping,
+    split_ratios=split_ratios
+)
+
+print(f"Train CSV: {train_csv}")
+print(f"Val CSV: {val_csv}")
+print(f"Test CSV: {test_csv}")
+""")
+]
+
+create_notebook(cells_01, 'notebooks/01_data_preparation.ipynb')
+
+# ---------------------------------------------------------
+# 02_train_mobilenet.ipynb
+# ---------------------------------------------------------
+cells_02 = [
+    markdown_cell("# Train MobileNet\n\nThis notebook trains the MobileNet model for recycling classification."),
+    code_cell("""
+import sys
+import torch
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from pathlib import Path
+
+# Add project root to path
+project_root = Path('..').resolve()
+if str(project_root) not in sys.path:
+    sys.path.append(str(project_root))
+
+from src.utils.config import Config
+from src.data.dataset import RecyclingDataset
+from src.data.augmentation import get_train_transforms, get_val_transforms
+from src.models.mobilenet import MobileNetClassifier, export_to_onnx, export_to_torchscript
+from src.training.trainer import Trainer
+from src.training.losses import get_loss_function
+from src.training.callbacks import ModelCheckpoint, EarlyStopping
+from src.utils.visualization import plot_training_history, show_batch
+"""),
+    markdown_cell("## 1. Setup"),
+    code_cell("""
+# Load config
+config = Config('../configs/mobilenet_config.yaml')
+
+# Set device
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print(f"Using device: {device}")
+
+# Create directories
+Path('../outputs/checkpoints').mkdir(parents=True, exist_ok=True)
+Path('../outputs/logs').mkdir(parents=True, exist_ok=True)
+Path('../outputs/exports').mkdir(parents=True, exist_ok=True)
+"""),
+    markdown_cell("## 2. Data Loading"),
+    code_cell("""
+# Transforms
+img_size = config.data.get('image_size', 224)
+train_transforms = get_train_transforms(img_size)
+val_transforms = get_val_transforms(img_size)
+
+# Datasets
+processed_dir = Path('../') / config.data.get('processed_dir')
+train_dataset = RecyclingDataset(processed_dir / 'train.csv', root_dir='../data', transforms=train_transforms)
+val_dataset = RecyclingDataset(processed_dir / 'val.csv', root_dir='../data', transforms=val_transforms)
+
+print(f"Train size: {len(train_dataset)}")
+print(f"Val size: {len(val_dataset)}")
+print(f"Classes: {train_dataset.class2idx}")
+
+# Dataloaders
+batch_size = config.training.get('batch_size', 32)
+num_workers = config.training.get('num_workers', 2)
+
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
+"""),
+    markdown_cell("## 3. Visualize Batch"),
+    code_cell("""
+# Show sample batch
+images, labels = next(iter(train_loader))
+show_batch(images, labels, train_dataset.idx2class)
+"""),
+    markdown_cell("## 4. Model Initialization"),
+    code_cell("""
+model = MobileNetClassifier(
+    num_classes=config.model.get('num_classes'),
+    architecture=config.model.get('architecture'),
+    pretrained=config.model.get('pretrained'),
+    dropout=config.model.get('dropout')
+)
+print(f"Model created: {config.model.get('architecture')}")
+"""),
+    markdown_cell("## 5. Training Setup"),
+    code_cell("""
+# Loss and Optimizer
+criterion = get_loss_function(config.training, device)
+optimizer = optim.Adam(
+    model.parameters(), 
+    lr=float(config.training.get('lr')), 
+    weight_decay=float(config.training.get('weight_decay'))
+)
+
+# Scheduler
+scheduler = optim.lr_scheduler.CosineAnnealingLR(
+    optimizer, 
+    T_max=config.training.get('epochs')
+)
+
+# Callbacks
+callbacks = [
+    ModelCheckpoint(dirpath='../outputs/checkpoints', monitor='val_f1_macro', mode='max'),
+    EarlyStopping(monitor='val_loss', patience=config.training.get('early_stopping', {}).get('patience', 5))
+]
+
+# Trainer
+trainer = Trainer(
+    model=model,
+    optimizer=optimizer,
+    criterion=criterion,
+    device=device,
+    config=config._config,
+    scheduler=scheduler,
+    callbacks=callbacks
+)
+"""),
+    markdown_cell("## 6. Train"),
+    code_cell("""
+epochs = config.training.get('epochs', 10)
+history = trainer.fit(train_loader, val_loader, epochs=epochs)
+"""),
+    markdown_cell("## 7. Results"),
+    code_cell("""
+plot_training_history(history)
+"""),
+    markdown_cell("## 8. Export Model"),
+    code_cell("""
+# Load best model
+best_model_path = '../outputs/checkpoints/best_model.pt'
+checkpoint = torch.load(best_model_path)
+model.load_state_dict(checkpoint['model_state_dict'])
+
+# Export
+export_to_onnx(model, '../outputs/exports/mobilenet.onnx')
+export_to_torchscript(model, '../outputs/exports/mobilenet_ts.pt')
+""")
+]
+
+create_notebook(cells_02, 'notebooks/02_train_mobilenet.ipynb')
+
+# ---------------------------------------------------------
+# 03_inference_demo.ipynb
+# ---------------------------------------------------------
+cells_03 = [
+    markdown_cell("# Inference Demo\n\nTest the trained model on images or camera feed."),
+    code_cell("""
+import sys
+from pathlib import Path
+
+# Add project root to path
+project_root = Path('..').resolve()
+if str(project_root) not in sys.path:
+    sys.path.append(str(project_root))
+
+from src.inference.predictor import RecyclingPredictor
+from src.inference.camera import CameraInference
+from src.utils.config import Config
+"""),
+    markdown_cell("## 1. Load Predictor"),
+    code_cell("""
+config = Config('../configs/mobilenet_config.yaml')
+model_path = '../outputs/checkpoints/best_model.pt'
+
+# We need the class mapping from training. 
+# Ideally this is saved with the model or config.
+# For now we reconstruct it or hardcode it if known.
+# In a real scenario, save class_mapping.json during training.
+class_mapping = {0: 'cardboard_paper', 1: 'ecoglasses', 2: 'metal_plastic', 3: 'trash'} # Example, verify with training output
+
+predictor = RecyclingPredictor(
+    model_path=model_path,
+    num_classes=config.model.get('num_classes'),
+    architecture=config.model.get('architecture'),
+    class_mapping=class_mapping
+)
+print("Predictor loaded.")
+"""),
+    markdown_cell("## 2. Single Image Prediction"),
+    code_cell("""
+# Test on a sample image from test set
+# img_path = '../data/processed/test/some_image.jpg'
+# result = predictor.predict(img_path)
+# print(result)
+"""),
+    markdown_cell("## 3. Real-time Camera Demo"),
+    code_cell("""
+# Start camera inference
+# Press 'q' to quit window
+
+camera = CameraInference(predictor, camera_id=0)
+# camera.run() 
+# Uncomment above line to run. Note: cv2.imshow might not work in all notebook environments (e.g. Colab).
+# Works best locally.
+""")
+]
+
+create_notebook(cells_03, 'notebooks/03_inference_demo.ipynb')
+```
+
+--- END FILE: generate_notebooks.py ---
+
+--- START FILE: src/__init__.py ---
+
+```python
+"""Utility package for recycling classification."""
+```
+
+--- END FILE: src/__init__.py ---
+
+--- START FILE: src/data/__init__.py ---
+
+```python
+"""Data module for recycling classification."""
+```
+
+--- END FILE: src/data/__init__.py ---
+
+--- START FILE: src/data/augmentation.py ---
+
+```python
+"""
+Data augmentation and transformation pipelines using Albumentations.
+Adapted from original notebook for MobileNet input requirements.
+"""
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+
+
+def get_train_transforms(image_size: int = 224):
+    """
+    Get training augmentation pipeline.
+    
+    Args:
+        image_size: Target image size (default: 224 for MobileNet)
+        
+    Returns:
+        Albumentations Compose transform
+    """
+    return A.Compose([
+        A.RandomResizedCrop(size=(image_size, image_size), scale=(0.7, 1.0)),
+        A.HorizontalFlip(p=0.5),
+        A.Rotate(limit=15, p=0.5),
+        A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.5),
+        A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
+        A.GaussNoise(var_limit=(10.0, 50.0), p=0.2),
+        A.Normalize(
+            mean=(0.485, 0.456, 0.406),  # ImageNet stats
+            std=(0.229, 0.224, 0.225)
+        ),
+        ToTensorV2()
+    ])
+
+
+def get_val_transforms(image_size: int = 224):
+    """
+    Get validation/test augmentation pipeline.
+    
+    Args:
+        image_size: Target image size (default: 224 for MobileNet)
+        
+    Returns:
+        Albumentations Compose transform
+    """
+    return A.Compose([
+        A.Resize(height=256, width=256),
+        A.CenterCrop(height=image_size, width=image_size),
+        A.Normalize(
+            mean=(0.485, 0.456, 0.406),
+            std=(0.229, 0.224, 0.225)
+        ),
+        ToTensorV2()
+    ])
+
+
+def get_inference_transforms(image_size: int = 224):
+    """
+    Get inference augmentation pipeline (minimal processing).
+    
+    Args:
+        image_size: Target image size (default: 224 for MobileNet)
+        
+    Returns:
+        Albumentations Compose transform
+    """
+    return A.Compose([
+        A.LongestMaxSize(max_size=image_size),
+        A.PadIfNeeded(
+            min_height=image_size,
+            min_width=image_size,
+            border_mode=0,
+            value=(0, 0, 0)
+        ),
+        A.Normalize(
+            mean=(0.485, 0.456, 0.406),
+            std=(0.229, 0.224, 0.225)
+        ),
+        ToTensorV2()
+    ])
+```
+
+--- END FILE: src/data/augmentation.py ---
+
+--- START FILE: src/data/dataset.py ---
+
+```python
+"""
+PyTorch Dataset class for recycling classification.
+"""
+import cv2
+import pandas as pd
+import torch
+from torch.utils.data import Dataset
+from pathlib import Path
+from typing import Dict, Optional, Callable
+
+
+class RecyclingDataset(Dataset):
+    """
+    Custom Dataset for recycling classification.
+    Supports loading from CSV with image paths and labels.
+    """
+    
+    def __init__(
+        self,
+        csv_path: str,
+        root_dir: str = "data/raw",
+        transforms: Optional[Callable] = None,
+        class2idx: Optional[Dict[str, int]] = None
+    ):
+        """
+        Args:
+            csv_path: Path to CSV file with columns ['filename', 'label']
+            root_dir: Root directory containing images
+            transforms: Albumentations transform pipeline
+            class2idx: Class name to index mapping (if None, created from data)
+        """
+        self.root_dir = Path(root_dir)
+        self.transforms = transforms
+        
+        # Load CSV
+        self.df = pd.read_csv(csv_path)
+        
+        # Create or use provided class mapping
+        if class2idx is None:
+            unique_classes = sorted(self.df['label'].unique())
+            self.class2idx = {cls: idx for idx, cls in enumerate(unique_classes)}
+        else:
+            self.class2idx = class2idx
+        
+        self.idx2class = {v: k for k, v in self.class2idx.items()}
+        self.num_classes = len(self.class2idx)
+    
+    def __len__(self) -> int:
+        return len(self.df)
+    
+    def __getitem__(self, idx: int):
+        """
+        Get item by index.
+        
+        Returns:
+            tuple: (image_tensor, label_idx)
+        """
+        row = self.df.iloc[idx]
+        
+        # Load image
+        img_path = self.root_dir / row['filename']
+        image = cv2.imread(str(img_path))
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        # Apply transforms
+        if self.transforms:
+            transformed = self.transforms(image=image)
+            image = transformed['image']
+        
+        # Get label
+        label = row['label']
+        label_idx = self.class2idx[label]
+        
+        return image, label_idx
+    
+    def get_class_distribution(self) -> Dict[str, int]:
+        """Get distribution of classes in dataset."""
+        return self.df['label'].value_counts().to_dict()
+    
+    def get_sample_by_class(self, class_name: str, n: int = 1):
+        """Get n random samples from a specific class."""
+        class_df = self.df[self.df['label'] == class_name]
+        if len(class_df) == 0:
+            raise ValueError(f"No samples found for class: {class_name}")
+        return class_df.sample(n=min(n, len(class_df)))
+```
+
+--- END FILE: src/data/dataset.py ---
+
+--- START FILE: src/data/preprocessing.py ---
+
+```python
+"""
+Data preprocessing utilities for recycling classification.
+Handles dataset downloading, merging, and splitting.
+"""
+import os
+import shutil
+import pandas as pd
+import numpy as np
+from pathlib import Path
+from sklearn.model_selection import train_test_split
+import kagglehub
+from typing import Dict, List, Tuple, Optional
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+def download_kaggle_dataset(dataset_name: str, target_dir: str) -> Path:
+    """
+    Download dataset from Kaggle.
+    
+    Args:
+        dataset_name: Kaggle dataset identifier (e.g., "zlatan599/garbage-dataset-classification")
+        target_dir: Directory to move the dataset to
+        
+    Returns:
+        Path to the downloaded dataset
+    """
+    logger.info(f"Downloading {dataset_name}...")
+    try:
+        # Download latest version
+        path = kagglehub.dataset_download(dataset_name)
+        logger.info(f"Dataset downloaded to cache: {path}")
+        
+        # Move to target directory if it doesn't exist
+        target_path = Path(target_dir)
+        if not target_path.exists():
+            target_path.mkdir(parents=True, exist_ok=True)
+            # Copy contents
+            for item in os.listdir(path):
+                s = os.path.join(path, item)
+                d = os.path.join(target_path, item)
+                if os.path.isdir(s):
+                    shutil.copytree(s, d, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(s, d)
+            logger.info(f"Dataset moved to {target_path}")
+        else:
+            logger.info(f"Target directory {target_path} already exists. Skipping move.")
+            
+        return target_path
+    except Exception as e:
+        logger.error(f"Failed to download dataset: {e}")
+        raise
+
+def get_image_files(directory: Path, extensions: Tuple[str] = ('.jpg', '.jpeg', '.png', '.bmp')) -> List[Path]:
+    """Recursively find all image files in a directory."""
+    images = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.lower().endswith(extensions):
+                images.append(Path(root) / file)
+    return images
+
+def create_dataset_csv(
+    raw_data_dir: str,
+    custom_data_dir: str,
+    output_dir: str,
+    class_mapping: Dict[str, List[str]],
+    split_ratios: Dict[str, float] = {'train': 0.7, 'val': 0.15, 'test': 0.15},
+    random_seed: int = 42
+):
+    """
+    Create train/val/test CSVs from raw and custom data.
+    
+    Args:
+        raw_data_dir: Path to Kaggle dataset
+        custom_data_dir: Path to custom ecoglasses dataset
+        output_dir: Directory to save CSVs
+        class_mapping: Dictionary mapping new classes to original classes
+        split_ratios: Train/val/test split ratios
+        random_seed: Random seed for reproducibility
+    """
+    raw_path = Path(raw_data_dir)
+    custom_path = Path(custom_data_dir)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    all_data = []
+    
+    # Invert class mapping for easier lookup: old_class -> new_class
+    old_to_new = {}
+    for new_class, old_classes in class_mapping.items():
+        for old_class in old_classes:
+            old_to_new[old_class] = new_class
+            
+    logger.info(f"Class mapping: {old_to_new}")
+    
+    # Process Kaggle dataset
+    if raw_path.exists():
+        logger.info(f"Processing raw data from {raw_path}")
+        # Assuming structure: raw_path / class_name / image.jpg
+        # Search for class directories recursively
+        # This handles nested structures like raw_path/Garbage_Dataset_Classification/images/class_name
+        for root, dirs, files in os.walk(raw_path):
+            for d in dirs:
+                original_label = d.lower()
+                
+                # Check if this directory name matches one of our expected classes
+                if original_label in old_to_new:
+                    class_dir = Path(root) / d
+                    new_label = old_to_new[original_label]
+                    
+                    logger.info(f"Found class directory: {original_label} -> {new_label} at {class_dir}")
+                    
+                    images = get_image_files(class_dir)
+                    
+                    for img in images:
+                        # Store relative path
+                        try:
+                            rel_path = img.relative_to(Path("data")) # Assuming data is root
+                        except ValueError:
+                            # If path is not relative to data, try to make it relative to project root
+                            # or just keep it as is if it works with the loader
+                            rel_path = img
+
+                        all_data.append({
+                            'filename': str(rel_path),
+                            'label': new_label,
+                            'original_label': original_label,
+                            'source': 'kaggle'
+                        })
+    else:
+        logger.warning(f"Raw data directory {raw_path} not found.")
+
+    # Process Custom dataset (Ecoglasses)
+    if custom_path.exists():
+        logger.info(f"Processing custom data from {custom_path}")
+        # Assuming structure: custom_path / image.jpg (all are ecoglasses)
+        # OR custom_path / class_name / image.jpg
+        
+        # Check if 'ecoglasses' is in class_mapping keys
+        target_class = 'ecoglasses'
+        if target_class in class_mapping:
+             # Look for images directly in custom_path or in subdirs
+            images = get_image_files(custom_path)
+            for img in images:
+                 # Store relative path
+                try:
+                    rel_path = img.relative_to(Path("data"))
+                except ValueError:
+                    # If custom path is not under data, copy it or use absolute (here we assume under data)
+                    rel_path = img
+                
+                all_data.append({
+                    'filename': str(rel_path),
+                    'label': target_class,
+                    'original_label': 'custom_ecoglasses',
+                    'source': 'custom'
+                })
+    else:
+        logger.warning(f"Custom data directory {custom_path} not found.")
+
+    if not all_data:
+        raise ValueError("No data found! Check paths and class mappings.")
+        
+    df = pd.DataFrame(all_data)
+    logger.info(f"Total images found: {len(df)}")
+    logger.info(f"Class distribution:\n{df['label'].value_counts()}")
+    
+    # Stratified Split
+    # First split: Train vs Temp (Val + Test)
+    train_ratio = split_ratios['train']
+    val_ratio = split_ratios['val']
+    test_ratio = split_ratios['test']
+    
+    # Normalize ratios if they don't sum to 1
+    total = train_ratio + val_ratio + test_ratio
+    train_ratio /= total
+    val_ratio /= total
+    test_ratio /= total
+    
+    train_df, temp_df = train_test_split(
+        df, 
+        test_size=(1 - train_ratio), 
+        stratify=df['label'], 
+        random_state=random_seed
+    )
+    
+    # Second split: Val vs Test
+    val_relative_ratio = val_ratio / (val_ratio + test_ratio)
+    val_df, test_df = train_test_split(
+        temp_df,
+        test_size=(1 - val_relative_ratio),
+        stratify=temp_df['label'],
+        random_state=random_seed
+    )
+    
+    # Save CSVs
+    train_csv = output_path / 'train.csv'
+    val_csv = output_path / 'val.csv'
+    test_csv = output_path / 'test.csv'
+    
+    train_df.to_csv(train_csv, index=False)
+    val_df.to_csv(val_csv, index=False)
+    test_df.to_csv(test_csv, index=False)
+    
+    logger.info(f"Saved splits to {output_path}")
+    logger.info(f"Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
+    
+    return train_csv, val_csv, test_csv
+
+if __name__ == "__main__":
+    # Example usage for testing
+    # This block will be executed if script is run directly
+    pass
+```
+
+--- END FILE: src/data/preprocessing.py ---
+
+--- START FILE: src/inference/camera.py ---
+
+```python
+"""
+Real-time camera inference module.
+"""
+import cv2
+import time
+import numpy as np
+from typing import Callable, Optional
+import logging
+
+from src.inference.predictor import RecyclingPredictor
+
+logger = logging.getLogger(__name__)
+
+class CameraInference:
+    """
+    Class to handle real-time inference from camera feed.
+    """
+    def __init__(
+        self,
+        predictor: RecyclingPredictor,
+        camera_id: int = 0,
+        width: int = 640,
+        height: int = 480,
+        fps: int = 30
+    ):
+        self.predictor = predictor
+        self.camera_id = camera_id
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.cap = None
+        self.is_running = False
+
+    def start(self):
+        """Start camera stream."""
+        self.cap = cv2.VideoCapture(self.camera_id)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        self.cap.set(cv2.CAP_PROP_FPS, self.fps)
+        
+        if not self.cap.isOpened():
+            raise RuntimeError(f"Could not open camera {self.camera_id}")
+            
+        self.is_running = True
+        logger.info(f"Camera {self.camera_id} started.")
+
+    def stop(self):
+        """Stop camera stream."""
+        self.is_running = False
+        if self.cap:
+            self.cap.release()
+        cv2.destroyAllWindows()
+        logger.info("Camera stopped.")
+
+    def run(self, callback: Optional[Callable[[dict], None]] = None):
+        """
+        Run inference loop.
+        
+        Args:
+            callback: Optional function to call with prediction result (e.g. trigger servomotor)
+        """
+        if not self.is_running:
+            self.start()
+            
+        logger.info("Starting inference loop. Press 'q' to quit.")
+        
+        try:
+            while self.is_running:
+                ret, frame = self.cap.read()
+                if not ret:
+                    logger.warning("Failed to grab frame")
+                    break
+                
+                # Preprocess for display (keep BGR)
+                display_frame = frame.copy()
+                
+                # Run inference (convert to RGB inside predictor)
+                # We pass the BGR frame directly, predictor handles conversion if numpy array
+                # Note: predictor.preprocess expects RGB if numpy, so we should convert here
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                
+                start_time = time.time()
+                result = self.predictor.predict(rgb_frame)
+                inference_time = (time.time() - start_time) * 1000
+                
+                # Draw results
+                class_name = result.get('class_name', str(result['class_id']))
+                conf = result['confidence']
+                
+                text = f"{class_name}: {conf:.2f} ({inference_time:.1f}ms)"
+                cv2.putText(display_frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                
+                # Show frame
+                cv2.imshow('Recycling Classification', display_frame)
+                
+                # Trigger callback
+                if callback:
+                    callback(result)
+                
+                # Check for quit
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+                    
+        except KeyboardInterrupt:
+            logger.info("Interrupted by user")
+        finally:
+            self.stop()
+
+# Example servomotor callback placeholder
+def trigger_servomotor(result: dict):
+    """
+    Placeholder for servomotor control logic.
+    """
+    cls = result.get('class_name')
+    conf = result.get('confidence')
+    
+    if conf > 0.8:
+        # Logic to send signal to Arduino/Raspberry Pi
+        # print(f"Triggering bin for {cls}")
+        pass
+```
+
+--- END FILE: src/inference/camera.py ---
+
+--- START FILE: src/inference/camera_gradcam.py ---
+
+```python
+"""
+Real-time camera inference with Grad-CAM visualization.
+"""
+import cv2
+import time
+import numpy as np
+from typing import Callable, Optional
+import logging
+from collections import deque
+
+from src.inference.predictor import RecyclingPredictor
+from src.inference.gradcam import GradCAMPredictor
+
+logger = logging.getLogger(__name__)
+
+
+class CameraInferenceWithGradCAM:
+    """
+    Class to handle real-time inference from camera feed with Grad-CAM visualization.
+    """
+    def __init__(
+        self,
+        predictor: RecyclingPredictor,
+        camera_id: int = 0,
+        width: int = 2000,
+        height: int = 2000,
+        fps: int = 30,
+        enable_gradcam: bool = True,
+        stability_duration: float = 4.0,  # seconds to wait for stable prediction
+        stereo_mode: str = None,  # Options: None, 'left', 'right'
+        black_threshold: float = 0.7,  # Percentage of black pixels to consider empty (0-1)
+        brightness_threshold: int = 40  # Max average brightness for black detection (0-255)
+    ):
+        self.predictor = predictor
+        self.camera_id = camera_id
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.cap = None
+        self.is_running = False
+        self.enable_gradcam = enable_gradcam
+        
+        # Stereo camera handling
+        self.stereo_mode = stereo_mode  # None, 'left', or 'right'
+        
+        # Empty frame detection (for black background)
+        self.black_threshold = black_threshold
+        self.brightness_threshold = brightness_threshold
+        
+        # Stability tracking for Arduino
+        self.stability_duration = stability_duration
+        self.prediction_history = deque(maxlen=100)  # Keep last 100 predictions
+        self.last_stable_class = None
+        self.last_sent_class = None
+        
+        # Zoom functionality
+        self.zoom_level = 2.1
+        self.zoom_step = 0.1
+        self.min_zoom = 1.0
+        self.max_zoom = 3.0
+        
+        # Setup Grad-CAM
+        if self.enable_gradcam:
+            self.gradcam_predictor = GradCAMPredictor(predictor)
+
+    def start(self):
+        """Start camera stream."""
+        self.cap = cv2.VideoCapture(self.camera_id)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        self.cap.set(cv2.CAP_PROP_FPS, self.fps)
+        
+        if not self.cap.isOpened():
+            raise RuntimeError(f"Could not open camera {self.camera_id}")
+            
+        self.is_running = True
+        logger.info(f"Camera {self.camera_id} started.")
+
+    def stop(self):
+        """Stop camera stream."""
+        self.is_running = False
+        if self.cap:
+            self.cap.release()
+        cv2.destroyAllWindows()
+        logger.info("Camera stopped.")
+
+    def extract_stereo_view(self, frame):
+        """Extract single view from stereo camera if stereo_mode is set."""
+        if self.stereo_mode is None:
+            return frame
+        
+        height, width = frame.shape[:2]
+        half_width = width // 2
+        
+        if self.stereo_mode == 'left':
+            # Use left half of the image
+            return frame[:, :half_width]
+        elif self.stereo_mode == 'right':
+            # Use right half of the image
+            return frame[:, half_width:]
+        
+        return frame
+    
+    def apply_zoom(self, frame):
+        """Apply digital zoom to frame."""
+        if self.zoom_level == 1.0:
+            return frame
+        
+        height, width = frame.shape[:2]
+        
+        # Calculate crop size
+        crop_width = int(width / self.zoom_level)
+        crop_height = int(height / self.zoom_level)
+        
+        # Calculate center crop
+        x = (width - crop_width) // 2
+        y = (height - crop_height) // 2
+        
+        # Crop and resize back to original size
+        cropped = frame[y:y+crop_height, x:x+crop_width]
+        zoomed = cv2.resize(cropped, (width, height), interpolation=cv2.INTER_LINEAR)
+        
+        return zoomed
+    
+    def check_stability(self, class_id: int, confidence: float, min_confidence: float = 0.7):
+        """
+        Check if the prediction has been stable for the required duration.
+        
+        Args:
+            class_id: Current predicted class
+            confidence: Confidence of prediction
+            min_confidence: Minimum confidence to consider prediction valid
+            
+        Returns:
+            tuple: (is_stable, stable_class_id) - Whether prediction is stable and which class
+        """
+        current_time = time.time()
+        
+        # Only track high-confidence predictions
+        if confidence >= min_confidence:
+            self.prediction_history.append((current_time, class_id))
+        
+        # Remove old predictions outside stability window
+        cutoff_time = current_time - self.stability_duration
+        while self.prediction_history and self.prediction_history[0][0] < cutoff_time:
+            self.prediction_history.popleft()
+        
+        # Check if we have enough predictions in the window
+        if len(self.prediction_history) < 5:  # Need at least 5 predictions
+            return False, None
+        
+        # Check if all recent predictions are the same class
+        recent_classes = [cls for _, cls in self.prediction_history]
+        if len(set(recent_classes)) == 1:  # All predictions are the same
+            stable_class = recent_classes[0]
+            
+            # Only return True if this is different from last sent class
+            if stable_class != self.last_sent_class:
+                self.last_stable_class = stable_class
+                return True, stable_class
+        
+        return False, None
+    
+    def process_frame(self, result):
+        """
+        Process a single frame and return prediction result.
+        Can be overridden by subclasses (e.g., for Arduino integration).
+        """
+        # This method can be overridden for custom processing
+        return None
+
+    def run(self, callback: Optional[Callable[[dict], None]] = None):
+        """
+        Run inference loop with Grad-CAM visualization.
+        
+        Args:
+            callback: Optional function to call with prediction result
+        """
+        if not self.is_running:
+            self.start()
+            
+        logger.info("Starting inference loop with Grad-CAM visualization.")
+        logger.info("Press 'q' to quit, 'g' to toggle Grad-CAM, 's' to save frame")
+        logger.info("Press '+'/'-' to zoom in/out")
+        
+        try:
+            while self.is_running:
+                ret, frame = self.cap.read()
+                if not ret:
+                    logger.warning("Failed to grab frame")
+                    break
+                
+                # Extract single view if stereo camera
+                frame = self.extract_stereo_view(frame)
+                
+                # Apply zoom
+                frame = self.apply_zoom(frame)
+                
+                # Convert to RGB for model
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                
+                start_time = time.time()
+                
+                if self.enable_gradcam:
+                    # Run inference with Grad-CAM
+                    result, gradcam_overlay = self.gradcam_predictor.predict_with_cam(rgb_frame)
+                    # Convert overlay back to BGR for display
+                    display_frame = cv2.cvtColor(gradcam_overlay, cv2.COLOR_RGB2BGR)
+                else:
+                    # Run normal inference
+                    result = self.predictor.predict(rgb_frame)
+                    display_frame = frame.copy()
+                
+                inference_time = (time.time() - start_time) * 1000
+                
+                # Check stability and call process_frame for custom behavior
+                class_id = result['class_id']
+                confidence = result['confidence']
+                is_stable, stable_class = self.check_stability(class_id, confidence)
+                
+                # Call custom process_frame (for Arduino integration)
+                if is_stable and stable_class is not None:
+                    result['stable_class'] = stable_class
+                    self.process_frame(result)
+                
+                # Draw results
+                class_name = result.get('class_name', str(result['class_id']))
+                conf = result['confidence']
+                
+                # Main prediction text with stability indicator
+                stability_indicator = "✓ STABLE" if is_stable else ""
+                text = f"{class_name}: {conf:.2f} {stability_indicator}"
+                color = (0, 255, 0) if is_stable else (255, 255, 0)
+                cv2.putText(display_frame, text, (10, 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+                
+                # Inference time
+                time_text = f"{inference_time:.1f}ms"
+                cv2.putText(display_frame, time_text, (10, 70), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                
+                # Show probabilities for all classes
+                y_offset = 110
+                for idx, prob in enumerate(result['probabilities']):
+                    class_label = self.predictor.class_mapping.get(idx, f"Class {idx}")
+                    prob_text = f"{class_label}: {prob:.3f}"
+                    color = (0, 255, 0) if idx == result['class_id'] else (200, 200, 200)
+                    cv2.putText(display_frame, prob_text, (10, y_offset), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                    y_offset += 25
+                
+                # Grad-CAM status
+                gradcam_status = "ON" if self.enable_gradcam else "OFF"
+                cv2.putText(display_frame, f"Grad-CAM: {gradcam_status}", 
+                           (display_frame.shape[1] - 220, 30),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+                
+                # Zoom level and stereo mode
+                zoom_text = f"Zoom: {self.zoom_level:.1f}x"
+                if self.stereo_mode:
+                    zoom_text += f" ({self.stereo_mode.upper()})"
+                cv2.putText(display_frame, zoom_text, 
+                           (display_frame.shape[1] - 220, 60),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+                
+                # Instructions
+                cv2.putText(display_frame, "q: quit | g: Grad-CAM | s: save | +/-: zoom", 
+                           (10, display_frame.shape[0] - 10),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+                
+                # Show frame
+                cv2.imshow('Recycling Classification with Grad-CAM', display_frame)
+                
+                # Trigger callback
+                if callback:
+                    callback(result)
+                
+                # Handle key presses
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('q'):
+                    break
+                elif key == ord('g'):
+                    self.enable_gradcam = not self.enable_gradcam
+                    status = "enabled" if self.enable_gradcam else "disabled"
+                    print(f"Grad-CAM {status}")
+                elif key == ord('s'):
+                    filename = f"capture_{int(time.time())}.jpg"
+                    cv2.imwrite(filename, display_frame)
+                    print(f"Saved frame to {filename}")
+                elif key == ord('+') or key == ord('='):
+                    self.zoom_level = min(self.zoom_level + self.zoom_step, self.max_zoom)
+                    print(f"Zoom: {self.zoom_level:.1f}x")
+                elif key == ord('-') or key == ord('_'):
+                    self.zoom_level = max(self.zoom_level - self.zoom_step, self.min_zoom)
+                    print(f"Zoom: {self.zoom_level:.1f}x")
+                    
+        except KeyboardInterrupt:
+            logger.info("Interrupted by user")
+        finally:
+            self.stop()
+```
+
+--- END FILE: src/inference/camera_gradcam.py ---
+
+--- START FILE: src/inference/gradcam.py ---
+
+```python
+"""
+Grad-CAM (Gradient-weighted Class Activation Mapping) for MobileNetV3.
+Visualizes which regions of the image the model focuses on for predictions.
+"""
+import torch
+import torch.nn.functional as F
+import cv2
+import numpy as np
+from typing import Tuple, Optional
+
+
+class GradCAM:
+    """
+    Grad-CAM implementation for visualization.
+    """
+    
+    def __init__(self, model, target_layer):
+        """
+        Args:
+            model: The trained model
+            target_layer: The layer to compute gradients on (e.g., last conv layer)
+        """
+        self.model = model
+        self.target_layer = target_layer
+        self.gradients = None
+        self.activations = None
+        
+        # Register hooks
+        self.target_layer.register_forward_hook(self._save_activation)
+        self.target_layer.register_backward_hook(self._save_gradient)
+    
+    def _save_activation(self, module, input, output):
+        """Hook to save forward pass activations."""
+        self.activations = output.detach()
+    
+    def _save_gradient(self, module, grad_input, grad_output):
+        """Hook to save backward pass gradients."""
+        self.gradients = grad_output[0].detach()
+    
+    def generate_cam(self, input_tensor: torch.Tensor, target_class: Optional[int] = None) -> np.ndarray:
+        """
+        Generate Grad-CAM heatmap.
+        
+        Args:
+            input_tensor: Input image tensor (1, C, H, W)
+            target_class: Target class index (if None, uses predicted class)
+            
+        Returns:
+            Heatmap as numpy array (H, W) in range [0, 1]
+        """
+        # Forward pass
+        self.model.eval()
+        output = self.model(input_tensor)
+        
+        # Get target class
+        if target_class is None:
+            target_class = output.argmax(dim=1).item()
+        
+        # Backward pass
+        self.model.zero_grad()
+        class_score = output[0, target_class]
+        class_score.backward()
+        
+        # Get gradients and activations
+        gradients = self.gradients[0]  # (C, H, W)
+        activations = self.activations[0]  # (C, H, W)
+        
+        # Global average pooling of gradients
+        weights = gradients.mean(dim=(1, 2), keepdim=True)  # (C, 1, 1)
+        
+        # Weighted combination of activation maps
+        cam = (weights * activations).sum(dim=0)  # (H, W)
+        
+        # Apply ReLU and normalize
+        cam = F.relu(cam)
+        cam = cam.cpu().numpy()
+        
+        # Normalize to [0, 1]
+        if cam.max() > 0:
+            cam = cam / cam.max()
+        
+        return cam
+    
+    def overlay_heatmap(
+        self, 
+        image: np.ndarray, 
+        heatmap: np.ndarray, 
+        alpha: float = 0.4,
+        colormap: int = cv2.COLORMAP_JET
+    ) -> np.ndarray:
+        """
+        Overlay heatmap on original image.
+        
+        Args:
+            image: Original RGB image (H, W, 3)
+            heatmap: Grad-CAM heatmap (h, w)
+            alpha: Transparency of heatmap overlay
+            colormap: OpenCV colormap
+            
+        Returns:
+            Overlayed image (H, W, 3)
+        """
+        # Resize heatmap to match image size
+        heatmap_resized = cv2.resize(heatmap, (image.shape[1], image.shape[0]))
+        
+        # Convert heatmap to uint8 and apply colormap
+        heatmap_colored = cv2.applyColorMap(
+            np.uint8(255 * heatmap_resized), 
+            colormap
+        )
+        
+        # Convert to RGB (OpenCV uses BGR)
+        heatmap_colored = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
+        
+        # Overlay
+        overlayed = cv2.addWeighted(image, 1 - alpha, heatmap_colored, alpha, 0)
+        
+        return overlayed
+
+
+def get_target_layer_mobilenet(model):
+    """
+    Get the appropriate target layer for MobileNetV3.
+    
+    Args:
+        model: MobileNetClassifier instance
+        
+    Returns:
+        Target layer for Grad-CAM (last convolutional layer)
+    """
+    # For MobileNetV3, use the last layer of features
+    # model.model.features[-1] is typically the last conv block
+    return model.model.features[-1]
+
+
+class GradCAMPredictor:
+    """
+    Predictor wrapper with Grad-CAM visualization.
+    """
+    
+    def __init__(self, predictor):
+        """
+        Args:
+            predictor: RecyclingPredictor instance
+        """
+        self.predictor = predictor
+        
+        # Setup Grad-CAM
+        target_layer = get_target_layer_mobilenet(self.predictor.model)
+        self.gradcam = GradCAM(self.predictor.model, target_layer)
+    
+    def predict_with_cam(self, image: np.ndarray) -> Tuple[dict, np.ndarray]:
+        """
+        Run prediction with Grad-CAM visualization.
+        
+        Args:
+            image: RGB image (H, W, 3)
+            
+        Returns:
+            (prediction_dict, overlayed_image)
+        """
+        # Get prediction
+        result = self.predictor.predict(image)
+        
+        # Preprocess for Grad-CAM
+        tensor = self.predictor.preprocess(image)
+        
+        # Generate heatmap
+        heatmap = self.gradcam.generate_cam(tensor, target_class=result['class_id'])
+        
+        # Overlay heatmap on original image
+        overlayed = self.gradcam.overlay_heatmap(image, heatmap, alpha=0.4)
+        
+        return result, overlayed
+```
+
+--- END FILE: src/inference/gradcam.py ---
+
+--- START FILE: src/inference/predictor.py ---
+
+```python
+"""
+Inference predictor wrapper for MobileNet recycling classification.
+"""
+import torch
+import cv2
+import numpy as np
+from pathlib import Path
+from typing import Tuple, Dict, List, Union, Optional, Any
+from PIL import Image
+
+from src.models.mobilenet import MobileNetClassifier
+from src.data.augmentation import get_inference_transforms
+
+import numpy as np
+import torch.serialization
+
+# Allowlist needed for PyTorch ≥2.6 checkpoints
+torch.serialization.add_safe_globals([np._core.multiarray.scalar])
+
+class RecyclingPredictor:
+    """
+    Wrapper for running inference with trained MobileNet model.
+    """
+    def __init__(
+        self,
+        model_path: str,
+        num_classes: int = 4,
+        architecture: str = 'mobilenet_v3_large',
+        device: str = 'cpu',
+        class_mapping: Optional[Dict[int, str]] = None
+    ):
+        """
+        Args:
+            model_path: Path to trained model checkpoint (.pt)
+            num_classes: Number of classes
+            architecture: Model architecture name
+            device: Device to run inference on ('cpu' or 'cuda')
+            class_mapping: Dictionary mapping class indices to names
+        """
+        self.device = device
+        self.class_mapping = class_mapping
+        
+        # Load model
+        self.model = MobileNetClassifier(
+            num_classes=num_classes,
+            architecture=architecture,
+            pretrained=False  # No need to download weights, we load checkpoint
+        )
+        
+        # Load weights
+        checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+        if 'model_state_dict' in checkpoint:
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            self.model.load_state_dict(checkpoint)
+            
+        self.model.to(device)
+        self.model.eval()
+        
+        # Setup transforms
+        self.transforms = get_inference_transforms()
+
+    def preprocess(self, image: Union[str, Path, np.ndarray, Image.Image]) -> torch.Tensor:
+        """
+        Preprocess image for model input.
+        """
+        if isinstance(image, (str, Path)):
+            image = cv2.imread(str(image))
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        elif isinstance(image, Image.Image):
+            image = np.array(image)
+        elif isinstance(image, np.ndarray):
+            if len(image.shape) == 3 and image.shape[2] == 3:
+                # Assume BGR if coming from OpenCV, convert to RGB
+                # But if user passes RGB numpy array, this might be wrong.
+                # Standardizing on expecting RGB numpy array or path.
+                # For safety with OpenCV inputs (which are BGR), we might want to ensure RGB.
+                # However, Albumentations expects RGB.
+                pass
+                
+        # Apply transforms
+        transformed = self.transforms(image=image)
+        tensor = transformed['image'].unsqueeze(0) # Add batch dim
+        return tensor.to(self.device)
+
+    @torch.no_grad()
+    def predict(self, image: Union[str, Path, np.ndarray]) -> Dict[str, Any]:
+        """
+        Run prediction on a single image.
+        
+        Returns:
+            Dictionary with 'class_id', 'class_name', 'confidence', 'probabilities'
+        """
+        tensor = self.preprocess(image)
+        
+        outputs = self.model(tensor)
+        probs = torch.softmax(outputs, dim=1)
+        
+        conf, pred_idx = torch.max(probs, dim=1)
+        pred_idx = pred_idx.item()
+        confidence = conf.item()
+        
+        result = {
+            'class_id': pred_idx,
+            'confidence': confidence,
+            'probabilities': probs.cpu().numpy()[0]
+        }
+        
+        # DEBUG: Print probabilities to console
+        #print(f"Pred: {result['class_id']} | Probs: {[f'{p:.4f}' for p in result['probabilities']]}")
+        
+        if self.class_mapping:
+            result['class_name'] = self.class_mapping.get(pred_idx, str(pred_idx))
+            
+        return result
+
+    @torch.no_grad()
+    def predict_batch(self, images: List[Union[str, Path]]) -> List[Dict[str, Any]]:
+        """Run prediction on a batch of images."""
+        results = []
+        for img in images:
+            results.append(self.predict(img))
+        return results
+```
+
+--- END FILE: src/inference/predictor.py ---
+
+--- START FILE: src/models/__init__.py ---
+
+```python
+"""Models module for recycling classification."""
+```
+
+--- END FILE: src/models/__init__.py ---
+
+--- START FILE: src/models/mobilenet.py ---
+
+```python
+"""
+MobileNet model wrapper for recycling classification.
+"""
+import torch
+import torch.nn as nn
+from torchvision import models
+from typing import Literal
+
+
+class MobileNetClassifier(nn.Module):
+    """
+    MobileNet wrapper for recycling classification.
+    Supports MobileNetV2 and MobileNetV3 architectures.
+    """
+    
+    def __init__(
+        self,
+        num_classes: int = 4,
+        architecture: Literal['mobilenet_v2', 'mobilenet_v3_small', 'mobilenet_v3_large'] = 'mobilenet_v3_large',
+        pretrained: bool = True,
+        dropout: float = 0.2
+    ):
+        """
+        Args:
+            num_classes: Number of output classes
+            architecture: MobileNet variant to use
+            pretrained: Whether to load ImageNet pretrained weights
+            dropout: Dropout rate for final classifier
+        """
+        super().__init__()
+        
+        self.architecture = architecture
+        self.num_classes = num_classes
+        
+        # Load base model
+        if architecture == 'mobilenet_v2':
+            weights = models.MobileNet_V2_Weights.IMAGENET1K_V1 if pretrained else None
+            self.model = models.mobilenet_v2(weights=weights)
+            in_features = self.model.classifier[1].in_features
+            
+            # Replace classifier
+            self.model.classifier = nn.Sequential(
+                nn.Dropout(p=dropout),
+                nn.Linear(in_features, num_classes)
+            )
+            
+        elif architecture == 'mobilenet_v3_small':
+            weights = models.MobileNet_V3_Small_Weights.IMAGENET1K_V1 if pretrained else None
+            self.model = models.mobilenet_v3_small(weights=weights)
+
+            in_features = self.model.classifier[0].in_features
+
+            self.model.classifier = nn.Sequential(
+                nn.Linear(in_features, 1024),
+                nn.Hardswish(inplace=True),
+                nn.Dropout(p=dropout, inplace=True),
+                nn.Linear(1024, num_classes)
+            )
+
+            
+        elif architecture == 'mobilenet_v3_large':
+            weights = models.MobileNet_V3_Large_Weights.IMAGENET1K_V1 if pretrained else None
+            self.model = models.mobilenet_v3_large(weights=weights)
+
+            # Detectar la cantidad REAL de features de entrada (puede ser 960 o 1280)
+            in_features = self.model.classifier[0].in_features
+
+            # Reemplazar classifier manteniendo estructura original pero adaptable
+            self.model.classifier = nn.Sequential(
+                nn.Linear(in_features, 1280),
+                nn.Hardswish(inplace=True),
+                nn.Dropout(p=dropout, inplace=True),
+                nn.Linear(1280, num_classes)
+            )
+
+        else:
+            raise ValueError(f"Unknown architecture: {architecture}")
+    
+    def forward(self, x):
+        """Forward pass."""
+        return self.model(x)
+    
+    def freeze_backbone(self):
+        """Freeze all layers except classifier (for transfer learning)."""
+        for param in self.model.features.parameters():
+            param.requires_grad = False
+    
+    def unfreeze_backbone(self):
+        """Unfreeze all layers."""
+        for param in self.model.parameters():
+            param.requires_grad = True
+    
+    def get_num_trainable_params(self) -> int:
+        """Get number of trainable parameters."""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+    
+    def get_num_total_params(self) -> int:
+        """Get total number of parameters."""
+        return sum(p.numel() for p in self.parameters())
+
+
+def load_checkpoint(model: MobileNetClassifier, checkpoint_path: str, device: str = 'cpu'):
+    """
+    Load model from checkpoint.
+    
+    Args:
+        model: MobileNetClassifier instance
+        checkpoint_path: Path to checkpoint file
+        device: Device to load model on
+        
+    Returns:
+        Loaded model and checkpoint metadata
+    """
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    
+    return model, checkpoint
+
+
+def export_to_onnx(model: MobileNetClassifier, save_path: str, input_size: tuple = (1, 3, 224, 224)):
+    """
+    Export model to ONNX format.
+    
+    Args:
+        model: MobileNetClassifier instance
+        save_path: Path to save ONNX model
+        input_size: Input tensor size (batch, channels, height, width)
+    """
+    model.eval()
+    dummy_input = torch.randn(input_size)
+    
+    torch.onnx.export(
+        model,
+        dummy_input,
+        save_path,
+        export_params=True,
+        opset_version=17,
+        do_constant_folding=True,
+        input_names=['input'],
+        output_names=['output'],
+        dynamic_axes={
+            'input': {0: 'batch_size'},
+            'output': {0: 'batch_size'}
+        }
+    )
+    print(f"Model exported to ONNX: {save_path}")
+
+
+def export_to_torchscript(model: MobileNetClassifier, save_path: str):
+    """
+    Export model to TorchScript format.
+    
+    Args:
+        model: MobileNetClassifier instance
+        save_path: Path to save TorchScript model
+    """
+    model.eval()
+    scripted_model = torch.jit.script(model)
+    scripted_model.save(save_path)
+    print(f"Model exported to TorchScript: {save_path}")
+```
+
+--- END FILE: src/models/mobilenet.py ---
+
+--- START FILE: src/training/__init__.py ---
+
+```python
+"""Training module for recycling classification."""
+```
+
+--- END FILE: src/training/__init__.py ---
+
+--- START FILE: src/training/callbacks.py ---
+
+```python
+"""
+Training callbacks for checkpointing and early stopping.
+"""
+import torch
+import numpy as np
+from pathlib import Path
+from typing import Dict, Any, Optional
+import logging
+
+logger = logging.getLogger(__name__)
+
+class Callback:
+    """Base callback class."""
+    def on_epoch_end(self, epoch: int, metrics: Dict[str, float], model: torch.nn.Module, optimizer: torch.optim.Optimizer):
+        pass
+
+class ModelCheckpoint(Callback):
+    """
+    Save model checkpoints based on validation metric.
+    """
+    def __init__(
+        self, 
+        dirpath: str, 
+        filename: str = "best_model.pt", 
+        monitor: str = "val_f1_macro", 
+        mode: str = "max"
+    ):
+        self.dirpath = Path(dirpath)
+        self.dirpath.mkdir(parents=True, exist_ok=True)
+        self.filename = filename
+        self.monitor = monitor
+        self.mode = mode
+        self.best_score = -np.inf if mode == "max" else np.inf
+        
+    def on_epoch_end(self, epoch: int, metrics: Dict[str, float], model: torch.nn.Module, optimizer: torch.optim.Optimizer):
+        current_score = metrics.get(self.monitor)
+        
+        if current_score is None:
+            logger.warning(f"Metric {self.monitor} not found in metrics. Available: {metrics.keys()}")
+            return
+            
+        improved = (self.mode == "max" and current_score > self.best_score) or \
+                   (self.mode == "min" and current_score < self.best_score)
+                   
+        if improved:
+            self.best_score = current_score
+            save_path = self.dirpath / self.filename
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'best_score': self.best_score,
+                'metrics': metrics
+            }, save_path)
+            logger.info(f"Model saved to {save_path} (score: {self.best_score:.4f})")
+
+class EarlyStopping(Callback):
+    """
+    Stop training when a monitored metric has stopped improving.
+    """
+    def __init__(
+        self, 
+        monitor: str = "val_loss", 
+        min_delta: float = 0.0, 
+        patience: int = 5, 
+        mode: str = "min"
+    ):
+        self.monitor = monitor
+        self.min_delta = min_delta
+        self.patience = patience
+        self.mode = mode
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+        
+    def on_epoch_end(self, epoch: int, metrics: Dict[str, float], model: torch.nn.Module, optimizer: torch.optim.Optimizer):
+        score = metrics.get(self.monitor)
+        
+        if score is None:
+            return
+            
+        if self.best_score is None:
+            self.best_score = score
+        elif (self.mode == "min" and score > self.best_score - self.min_delta) or \
+             (self.mode == "max" and score < self.best_score + self.min_delta):
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+                logger.info(f"Early stopping triggered after {epoch} epochs.")
+        else:
+            self.best_score = score
+            self.counter = 0
+```
+
+--- END FILE: src/training/callbacks.py ---
+
+--- START FILE: src/training/losses.py ---
+
+```python
+"""
+Custom loss functions for recycling classification.
+"""
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class FocalLoss(nn.Module):
+    """
+    Focal Loss for addressing class imbalance.
+    FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
+    """
+    def __init__(self, alpha: float = 1.0, gamma: float = 2.0, reduction: str = 'mean'):
+        """
+        Args:
+            alpha: Weighting factor
+            gamma: Focusing parameter
+            reduction: 'mean', 'sum' or 'none'
+        """
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass.
+        
+        Args:
+            inputs: Logits (B, C)
+            targets: Labels (B)
+        """
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none')
+        pt = torch.exp(-ce_loss)
+        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss
+
+def get_loss_function(config: dict, device: str = 'cpu') -> nn.Module:
+    """
+    Factory function to get loss function based on config.
+    """
+    loss_name = config.get('criterion', 'CrossEntropyLoss')
+    
+    if loss_name == 'FocalLoss':
+        return FocalLoss().to(device)
+    elif loss_name == 'CrossEntropyLoss':
+        label_smoothing = config.get('label_smoothing', 0.0)
+        return nn.CrossEntropyLoss(label_smoothing=label_smoothing).to(device)
+    else:
+        raise ValueError(f"Unknown loss function: {loss_name}")
+```
+
+--- END FILE: src/training/losses.py ---
+
+--- START FILE: src/training/metrics.py ---
+
+```python
+"""
+Evaluation metrics for recycling classification.
+"""
+import torch
+import numpy as np
+from sklearn.metrics import f1_score, confusion_matrix, classification_report
+from typing import Dict, List, Tuple, Any
+import matplotlib.pyplot as plt
+import seaborn as sns
+import io
+
+class Metrics:
+    """
+    Class to compute and store metrics.
+    """
+    def __init__(self, device: str = 'cpu'):
+        self.device = device
+        self.reset()
+
+    def reset(self):
+        """Reset internal state."""
+        self.y_true = []
+        self.y_pred = []
+        self.losses = []
+
+    def update(self, logits: torch.Tensor, targets: torch.Tensor, loss: float = None):
+        """
+        Update metrics with batch results.
+        
+        Args:
+            logits: Model output logits (Batch, Num_Classes)
+            targets: Ground truth labels (Batch)
+            loss: Batch loss value
+        """
+        preds = torch.argmax(logits, dim=1)
+        
+        self.y_true.extend(targets.cpu().numpy())
+        self.y_pred.extend(preds.cpu().numpy())
+        
+        if loss is not None:
+            self.losses.append(loss)
+
+    def compute(self) -> Dict[str, float]:
+        """
+        Compute aggregate metrics.
+        
+        Returns:
+            Dictionary of metrics (accuracy, f1_macro, loss)
+        """
+        y_true = np.array(self.y_true)
+        y_pred = np.array(self.y_pred)
+        
+        accuracy = np.mean(y_true == y_pred)
+        f1 = f1_score(y_true, y_pred, average='macro')
+        avg_loss = np.mean(self.losses) if self.losses else 0.0
+        
+        return {
+            'accuracy': accuracy,
+            'f1_macro': f1,
+            'loss': avg_loss
+        }
+
+    def get_confusion_matrix(self, class_names: List[str] = None) -> np.ndarray:
+        """Get confusion matrix."""
+        return confusion_matrix(self.y_true, self.y_pred)
+
+    def get_classification_report(self, class_names: List[str] = None) -> str:
+        """Get text classification report."""
+        return classification_report(self.y_true, self.y_pred, target_names=class_names)
+
+def plot_confusion_matrix(cm: np.ndarray, class_names: List[str]) -> plt.Figure:
+    """
+    Plot confusion matrix heatmap.
+    
+    Args:
+        cm: Confusion matrix array
+        class_names: List of class names
+        
+    Returns:
+        Matplotlib figure
+    """
+    fig, ax = plt.subplots(figsize=(10, 8))
+    sns.heatmap(
+        cm, 
+        annot=True, 
+        fmt='d', 
+        cmap='Blues',
+        xticklabels=class_names,
+        yticklabels=class_names,
+        ax=ax
+    )
+    plt.ylabel('True Label')
+    plt.xlabel('Predicted Label')
+    plt.title('Confusion Matrix')
+    plt.tight_layout()
+    return fig
+```
+
+--- END FILE: src/training/metrics.py ---
+
+--- START FILE: src/training/trainer.py ---
+
+```python
+"""
+Main Trainer class for MobileNet recycling classification.
+"""
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
+from typing import Dict, List, Optional, Any
+import time
+
+from src.training.metrics import Metrics
+from src.training.callbacks import Callback, ModelCheckpoint, EarlyStopping
+from src.utils.logger import TrainingLogger
+
+class Trainer:
+    """
+    Trainer class for managing the training loop.
+    """
+    def __init__(
+        self,
+        model: nn.Module,
+        optimizer: optim.Optimizer,
+        criterion: nn.Module,
+        device: str,
+        config: dict,
+        scheduler: Optional[Any] = None,
+        callbacks: List[Callback] = None
+    ):
+        self.model = model.to(device)
+        self.optimizer = optimizer
+        self.criterion = criterion
+        self.device = device
+        self.config = config
+        self.scheduler = scheduler
+        self.callbacks = callbacks or []
+        
+        self.metrics = Metrics(device)
+        self.logger = TrainingLogger(config['paths']['log_dir'])
+        
+        # Mixed precision
+        self.use_amp = config['training'].get('use_amp', False)
+        self.scaler = torch.cuda.amp.GradScaler() if self.use_amp and 'cuda' in device else None
+        
+        self.history = {
+            'train_loss': [], 'val_loss': [],
+            'train_acc': [], 'val_acc': [],
+            'train_f1_macro': [], 'val_f1_macro': []
+        }
+
+    def train_one_epoch(self, dataloader: DataLoader, epoch: int) -> Dict[str, float]:
+        """Train for one epoch."""
+        self.model.train()
+        self.metrics.reset()
+        
+        pbar = tqdm(dataloader, desc=f"Epoch {epoch} [Train]", leave=False)
+        
+        for batch_idx, (images, labels) in enumerate(pbar):
+            images, labels = images.to(self.device), labels.to(self.device)
+            
+            self.optimizer.zero_grad()
+            
+            # Mixed precision training
+            if self.scaler:
+                with torch.cuda.amp.autocast():
+                    outputs = self.model(images)
+                    loss = self.criterion(outputs, labels)
+                
+                self.scaler.scale(loss).backward()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                outputs = self.model(images)
+                loss = self.criterion(outputs, labels)
+                loss.backward()
+                self.optimizer.step()
+            
+            # Update metrics
+            self.metrics.update(outputs, labels, loss.item())
+            
+            # Update progress bar
+            if batch_idx % 10 == 0:
+                pbar.set_postfix({'loss': f"{loss.item():.4f}"})
+        
+        epoch_metrics = self.metrics.compute()
+        return {f"train_{k}": v for k, v in epoch_metrics.items()}
+
+    @torch.no_grad()
+    def validate(self, dataloader: DataLoader, epoch: int) -> Dict[str, float]:
+        """Validate model."""
+        self.model.eval()
+        self.metrics.reset()
+        
+        for images, labels in tqdm(dataloader, desc=f"Epoch {epoch} [Val]", leave=False):
+            images, labels = images.to(self.device), labels.to(self.device)
+            
+            outputs = self.model(images)
+            loss = self.criterion(outputs, labels)
+            
+            self.metrics.update(outputs, labels, loss.item())
+            
+        epoch_metrics = self.metrics.compute()
+        return {f"val_{k}": v for k, v in epoch_metrics.items()}
+
+    def fit(self, train_dl: DataLoader, val_dl: DataLoader, epochs: int):
+        """
+        Main training loop.
+        """
+        self.logger.info(f"Starting training for {epochs} epochs on {self.device}")
+        
+        for epoch in range(1, epochs + 1):
+            start_time = time.time()
+            
+            # Train
+            train_metrics = self.train_one_epoch(train_dl, epoch)
+            
+            # Validate
+            val_metrics = self.validate(val_dl, epoch)
+            
+            # Scheduler step
+            if self.scheduler:
+                self.scheduler.step()
+            
+            # Combine metrics
+            all_metrics = {**train_metrics, **val_metrics}
+            
+            # Update history
+            for k, v in all_metrics.items():
+                if k in self.history:
+                    self.history[k].append(v)
+                elif k.replace('train_', '') in ['loss', 'acc', 'f1_macro']:
+                     # Initialize if not present (e.g. for custom metrics)
+                     if k not in self.history: self.history[k] = []
+                     self.history[k].append(v)
+
+            # Log
+            duration = time.time() - start_time
+            self.logger.log_metrics(epoch, all_metrics)
+            
+            # Callbacks
+            stop_training = False
+            for callback in self.callbacks:
+                callback.on_epoch_end(epoch, all_metrics, self.model, self.optimizer)
+                if isinstance(callback, EarlyStopping) and callback.early_stop:
+                    stop_training = True
+            
+            if stop_training:
+                self.logger.info("Early stopping triggered.")
+                break
+                
+        self.logger.info("Training completed.")
+        return self.history
+```
+
+--- END FILE: src/training/trainer.py ---
+
+--- START FILE: src/utils/config.py ---
+
+```python
+"""
+Configuration management utilities for MobileNet recycling classification.
+"""
+import yaml
+from pathlib import Path
+from typing import Dict, Any
+
+
+class Config:
+    """Configuration manager for loading and accessing YAML config files."""
+    
+    def __init__(self, config_path: str):
+        """
+        Load configuration from YAML file.
+        
+        Args:
+            config_path: Path to YAML configuration file
+        """
+        self.config_path = Path(config_path)
+        if not self.config_path.exists():
+            raise FileNotFoundError(f"Config file not found: {config_path}")
+        
+        with open(self.config_path, 'r') as f:
+            self._config = yaml.safe_load(f)
+    
+    def get(self, key: str, default: Any = None) -> Any:
+        """
+        Get configuration value using dot notation.
+        
+        Args:
+            key: Configuration key (e.g., 'model.architecture')
+            default: Default value if key not found
+            
+        Returns:
+            Configuration value
+        
+        Example:
+            >>> config = Config('configs/mobilenet_config.yaml')
+            >>> config.get('model.num_classes')
+            4
+        """
+        keys = key.split('.')
+        value = self._config
+        
+        for k in keys:
+            if isinstance(value, dict) and k in value:
+                value = value[k]
+            else:
+                return default
+        
+        return value
+    
+    def __getitem__(self, key: str) -> Any:
+        """Access config via dictionary syntax."""
+        return self.get(key)
+    
+    def __contains__(self, key: str) -> bool:
+        """Check if key exists in config."""
+        return self.get(key) is not None
+    
+    @property
+    def model(self) -> Dict:
+        """Get model configuration."""
+        return self._config.get('model', {})
+    
+    @property
+    def data(self) -> Dict:
+        """Get data configuration."""
+        return self._config.get('data', {})
+    
+    @property
+    def training(self) -> Dict:
+        """Get training configuration."""
+        return self._config.get('training', {})
+    
+    @property
+    def paths(self) -> Dict:
+        """Get paths configuration."""
+        return self._config.get('paths', {})
+    
+    @property
+    def class_mapping(self) -> Dict:
+        """Get class mapping configuration."""
+        return self._config.get('class_mapping', {})
+    
+    def save(self, save_path: str = None):
+        """
+        Save current configuration to YAML file.
+        
+        Args:
+            save_path: Path to save configuration. If None, overwrites original.
+        """
+        save_path = save_path or self.config_path
+        with open(save_path, 'w') as f:
+            yaml.dump(self._config, f, default_flow_style=False, sort_keys=False)
+```
+
+--- END FILE: src/utils/config.py ---
+
+--- START FILE: src/utils/logger.py ---
+
+```python
+"""
+Logging utilities for training monitoring.
+"""
+import logging
+import sys
+from pathlib import Path
+from typing import Optional
+
+def setup_logger(
+    name: str, 
+    log_dir: str, 
+    filename: str = "train.log", 
+    level: int = logging.INFO
+) -> logging.Logger:
+    """
+    Setup a logger that writes to console and file.
+    
+    Args:
+        name: Logger name
+        log_dir: Directory to save log file
+        filename: Log filename
+        level: Logging level
+        
+    Returns:
+        Configured logger
+    """
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    
+    # Prevent duplicate handlers
+    if logger.handlers:
+        return logger
+        
+    # Create formatters
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # File handler
+    log_path = Path(log_dir)
+    log_path.mkdir(parents=True, exist_ok=True)
+    file_handler = logging.FileHandler(log_path / filename)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    
+    # Console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+    
+    return logger
+
+class TrainingLogger:
+    """
+    Wrapper for logging training progress.
+    """
+    def __init__(self, log_dir: str):
+        self.logger = setup_logger("training", log_dir)
+        
+    def log_metrics(self, epoch: int, metrics: dict, stage: str = "Train"):
+        """
+        Log metrics for an epoch.
+        """
+        msg = f"[{stage}] Epoch {epoch} | "
+        msg += " | ".join([f"{k}: {v:.4f}" for k, v in metrics.items()])
+        self.logger.info(msg)
+        
+    def info(self, msg: str):
+        self.logger.info(msg)
+        
+    def warning(self, msg: str):
+        self.logger.warning(msg)
+        
+    def error(self, msg: str):
+        self.logger.error(msg)
+```
+
+--- END FILE: src/utils/logger.py ---
+
+--- START FILE: src/utils/visualization.py ---
+
+```python
+"""
+Visualization utilities for model predictions and data analysis.
+"""
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from typing import List, Tuple, Optional
+
+def show_batch(
+    images: torch.Tensor, 
+    labels: torch.Tensor, 
+    idx2class: dict, 
+    preds: Optional[torch.Tensor] = None,
+    mean: Tuple[float, ...] = (0.485, 0.456, 0.406),
+    std: Tuple[float, ...] = (0.229, 0.224, 0.225),
+    n_max: int = 8
+):
+    """
+    Display a batch of images with labels.
+    
+    Args:
+        images: Batch of images (B, C, H, W)
+        labels: Batch of labels (B)
+        idx2class: Mapping from index to class name
+        preds: Optional batch of predictions (B)
+        mean: Normalization mean to denormalize
+        std: Normalization std to denormalize
+        n_max: Maximum number of images to show
+    """
+    batch_size = len(images)
+    n = min(batch_size, n_max)
+    
+    cols = 4
+    rows = (n + cols - 1) // cols
+    
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 3, rows * 3.5))
+    axes = axes.flatten() if n > 1 else [axes]
+    
+    # Denormalize
+    mean = torch.tensor(mean).view(3, 1, 1)
+    std = torch.tensor(std).view(3, 1, 1)
+    
+    for i in range(n):
+        ax = axes[i]
+        
+        # Un-normalize and convert to numpy
+        img = images[i].cpu() * std + mean
+        img = img.permute(1, 2, 0).numpy()
+        img = np.clip(img, 0, 1)
+        
+        ax.imshow(img)
+        
+        true_label = idx2class[labels[i].item()]
+        title = f"True: {true_label}"
+        
+        if preds is not None:
+            pred_label = idx2class[preds[i].item()]
+            color = 'green' if labels[i] == preds[i] else 'red'
+            title += f"\nPred: {pred_label}"
+            ax.set_title(title, color=color, fontsize=10)
+        else:
+            ax.set_title(title, fontsize=10)
+            
+        ax.axis('off')
+        
+    # Hide empty subplots
+    for i in range(n, len(axes)):
+        axes[i].axis('off')
+        
+    plt.tight_layout()
+    return fig
+
+def plot_training_history(history: dict):
+    """
+    Plot training and validation metrics history.
+    
+    Args:
+        history: Dictionary containing lists of metrics
+                 e.g., {'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': []}
+    """
+    epochs = range(1, len(history['train_loss']) + 1)
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+    
+    # Loss plot
+    ax1.plot(epochs, history['train_loss'], 'b-', label='Training Loss')
+    if 'val_loss' in history:
+        ax1.plot(epochs, history['val_loss'], 'r-', label='Validation Loss')
+    ax1.set_title('Loss vs Epochs')
+    ax1.set_xlabel('Epochs')
+    ax1.set_ylabel('Loss')
+    ax1.legend()
+    ax1.grid(True)
+    
+    # Accuracy/F1 plot
+    metric_key = 'train_f1_macro' if 'train_f1_macro' in history else 'train_acc'
+    val_metric_key = 'val_f1_macro' if 'val_f1_macro' in history else 'val_acc'
+    label = 'F1 Macro' if 'f1' in metric_key else 'Accuracy'
+    
+    if metric_key in history:
+        ax2.plot(epochs, history[metric_key], 'b-', label=f'Training {label}')
+    if val_metric_key in history:
+        ax2.plot(epochs, history[val_metric_key], 'r-', label=f'Validation {label}')
+    ax2.set_title(f'{label} vs Epochs')
+    ax2.set_xlabel('Epochs')
+    ax2.set_ylabel(label)
+    ax2.legend()
+    ax2.grid(True)
+    
+    plt.tight_layout()
+    return fig
+```
+
+--- END FILE: src/utils/visualization.py ---
+
+--- START FILE: test_ecoglasses_prediction.py ---
+
+```python
+"""
+Test script to predict ecoglasses from the new bandeja images.
+"""
+from pathlib import Path
+from src.inference.predictor import RecyclingPredictor
+import sys
+
+def main():
+    # Class mapping (alphabetically sorted as created during training)
+    class_mapping = {
+        0: 'cardboard_paper',
+        1: 'ecoglasses',
+        2: 'metal_plastic',
+        3: 'trash'
+    }
+    
+    # Initialize predictor
+    print("Loading model...")
+    predictor = RecyclingPredictor(
+        model_path='outputs/checkpoints/best_model.pt',
+        num_classes=4,
+        architecture='mobilenet_v3_large',
+        device='cpu',  # Change to 'cuda' if you have GPU
+        class_mapping=class_mapping
+    )
+    print("Model loaded successfully!\n")
+    
+    # Get ecoglasses images (use JPG converted versions)
+    ecoglasses_dir = Path('data/custom/ecoglasses_bandeja_jpg')
+    image_files = list(ecoglasses_dir.glob('*.jpg'))
+    
+    if not image_files:
+        print(f"No .jpg images found in {ecoglasses_dir}")
+        print("Run convert_heic_images.py first to convert HEIC files")
+        return
+    
+    print(f"Found {len(image_files)} ecoglasses images")
+    print("Running predictions on first 5 images...\n")
+    
+    # Test on first few images
+    correct_predictions = 0
+    total_tested = 0
+    
+    for img_path in image_files[:5]:
+        try:
+            result = predictor.predict(str(img_path))
+            
+            predicted_class = result['class_name']
+            confidence = result['confidence']
+            
+            print(f"Image: {img_path.name}")
+            print(f"  Predicted: {predicted_class} (confidence: {confidence:.3f})")
+            print(f"  All probabilities:")
+            for class_id, prob in enumerate(result['probabilities']):
+                print(f"    {class_mapping[class_id]}: {prob:.3f}")
+            print()
+            
+            if predicted_class == 'ecoglasses':
+                correct_predictions += 1
+            total_tested += 1
+            
+        except Exception as e:
+            print(f"Error processing {img_path.name}: {e}")
+            print("  (HEIC files may need conversion to JPG/PNG)\n")
+            continue
+    
+    if total_tested > 0:
+        accuracy = correct_predictions / total_tested * 100
+        print(f"\nResults: {correct_predictions}/{total_tested} correctly predicted as ecoglasses ({accuracy:.1f}%)")
+    else:
+        print("\nNote: HEIC images need to be converted to JPG/PNG format.")
+        print("You can convert them using: sips -s format jpeg <input.heic> --out <output.jpg>")
+
+if __name__ == "__main__":
+    main()
+```
+
+--- END FILE: test_ecoglasses_prediction.py ---
+
+--- START FILE: test_finetuned_model.py ---
+
+```python
+"""
+Test the fine-tuned model on ecoglasses_bandeja images.
+Compare performance with the original model.
+"""
+from pathlib import Path
+from src.inference.predictor import RecyclingPredictor
+import numpy as np
+from collections import Counter
+
+def test_model(model_path: str, model_name: str):
+    """Test a model and return prediction statistics."""
+    
+    class_mapping = {
+        0: 'cardboard_paper',
+        1: 'ecoglasses',
+        2: 'metal_plastic',
+        3: 'trash'
+    }
+    
+    # Initialize predictor
+    predictor = RecyclingPredictor(
+        model_path=model_path,
+        num_classes=4,
+        architecture='mobilenet_v3_large',
+        device='cpu',
+        class_mapping=class_mapping
+    )
+    
+    # Get test images
+    ecoglasses_dir = Path('data/custom/ecoglasses_bandeja_jpg')
+    image_files = sorted(list(ecoglasses_dir.glob('*.jpg')))
+    
+    # Run predictions
+    predictions = []
+    confidences = []
+    
+    for img_path in image_files:
+        result = predictor.predict(str(img_path))
+        predictions.append(result['class_name'])
+        confidences.append(result['confidence'])
+    
+    # Calculate statistics
+    prediction_counts = Counter(predictions)
+    total = len(predictions)
+    ecoglasses_count = prediction_counts['ecoglasses']
+    ecoglasses_accuracy = (ecoglasses_count / total) * 100
+    
+    ecoglasses_confidences = [conf for pred, conf in zip(predictions, confidences) 
+                             if pred == 'ecoglasses']
+    
+    return {
+        'total': total,
+        'ecoglasses_count': ecoglasses_count,
+        'accuracy': ecoglasses_accuracy,
+        'predictions': prediction_counts,
+        'mean_confidence': np.mean(ecoglasses_confidences) if ecoglasses_confidences else 0,
+        'confidences': ecoglasses_confidences
+    }
+
+def main():
+    print("="*70)
+    print("COMPARING ORIGINAL VS FINE-TUNED MODEL")
+    print("="*70)
+    print()
+    
+    # Test original model
+    print("Testing ORIGINAL model...")
+    original_stats = test_model(
+        'outputs/checkpoints/best_model.pt',
+        'Original'
+    )
+    
+    print(f"  Ecoglasses detected: {original_stats['ecoglasses_count']}/{original_stats['total']} "
+          f"({original_stats['accuracy']:.1f}%)")
+    print(f"  Mean confidence: {original_stats['mean_confidence']:.3f}")
+    print()
+    
+    # Test fine-tuned model
+    print("Testing FINE-TUNED model...")
+    try:
+        finetuned_stats = test_model(
+            'outputs/checkpoints/best_model_finetuned.pt',
+            'Fine-tuned'
+        )
+        
+        print(f"  Ecoglasses detected: {finetuned_stats['ecoglasses_count']}/{finetuned_stats['total']} "
+              f"({finetuned_stats['accuracy']:.1f}%)")
+        print(f"  Mean confidence: {finetuned_stats['mean_confidence']:.3f}")
+        print()
+        
+        # Comparison
+        print("="*70)
+        print("COMPARISON")
+        print("="*70)
+        
+        accuracy_improvement = finetuned_stats['accuracy'] - original_stats['accuracy']
+        confidence_improvement = finetuned_stats['mean_confidence'] - original_stats['mean_confidence']
+        
+        print(f"\nAccuracy improvement: {accuracy_improvement:+.1f}%")
+        print(f"Confidence improvement: {confidence_improvement:+.3f}")
+        
+        print("\nPrediction distribution:")
+        print(f"{'Class':<20} {'Original':>15} {'Fine-tuned':>15} {'Change':>15}")
+        print("-"*70)
+        
+        for class_name in ['ecoglasses', 'cardboard_paper', 'metal_plastic', 'trash']:
+            orig_count = original_stats['predictions'][class_name]
+            fine_count = finetuned_stats['predictions'][class_name]
+            change = fine_count - orig_count
+            
+            print(f"{class_name:<20} {orig_count:>15d} {fine_count:>15d} {change:+15d}")
+        
+        print()
+        
+        if accuracy_improvement > 10:
+            print("✅ Significant improvement! The fine-tuned model is much better.")
+        elif accuracy_improvement > 5:
+            print("✅ Good improvement! The fine-tuned model performs better.")
+        elif accuracy_improvement > 0:
+            print("✓ Slight improvement. The fine-tuned model is a bit better.")
+        else:
+            print("⚠️ No improvement. The original model was already well-suited for this data.")
+        
+        print("\nRecommendation:")
+        if finetuned_stats['accuracy'] > original_stats['accuracy']:
+            print("  Use the fine-tuned model for better ecoglasses_bandeja predictions:")
+            print("  cp outputs/checkpoints/best_model_finetuned.pt outputs/checkpoints/best_model.pt")
+        else:
+            print("  Keep using the original model.")
+        
+    except FileNotFoundError:
+        print("  ❌ Fine-tuned model not found!")
+        print("  Run: python finetune_ecoglasses.py")
+        print()
+        return
+    
+    print("\n" + "="*70)
+
+if __name__ == "__main__":
+    main()
+```
+
+--- END FILE: test_finetuned_model.py ---
+
+--- START FILE: visualize_predictions.py ---
+
+```python
+"""
+Visualize prediction results - create a summary showing correctly and incorrectly classified images.
+Useful for understanding what the model struggles with.
+"""
+import pandas as pd
+import cv2
+import numpy as np
+from pathlib import Path
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend
+
+def create_visualization_grid(csv_path: str, output_path: str = 'prediction_visualization.png'):
+    """
+    Create a grid visualization of predictions.
+    Shows examples of correct and incorrect predictions.
+    """
+    # Load predictions
+    df = pd.read_csv(csv_path)
+    
+    # Separate correct and incorrect
+    correct_df = df[df['predicted_class'] == 'ecoglasses'].sort_values('confidence', ascending=False)
+    incorrect_df = df[df['predicted_class'] != 'ecoglasses'].sort_values('confidence', ascending=False)
+    
+    # Create figure
+    fig = plt.figure(figsize=(20, 12))
+    
+    # Title
+    fig.suptitle(f'Ecoglasses Prediction Results: {len(correct_df)}/{len(df)} Correct ({len(correct_df)/len(df)*100:.1f}%)', 
+                 fontsize=20, fontweight='bold')
+    
+    # Top row: Best correct predictions
+    ax_correct = fig.add_subplot(2, 1, 1)
+    ax_correct.set_title('✅ Correctly Classified as Ecoglasses (Top 10 by confidence)', 
+                         fontsize=16, fontweight='bold', color='green')
+    ax_correct.axis('off')
+    
+    correct_images = []
+    for i, (_, row) in enumerate(correct_df.head(10).iterrows()):
+        img = cv2.imread(row['filepath'])
+        if img is not None:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = cv2.resize(img, (150, 150))
+            
+            # Add confidence text
+            cv2.putText(img, f"{row['confidence']:.3f}", (5, 20),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            correct_images.append(img)
+    
+    if correct_images:
+        correct_grid = np.hstack(correct_images)
+        ax_correct.imshow(correct_grid)
+    
+    # Bottom row: Misclassified (worst predictions)
+    ax_incorrect = fig.add_subplot(2, 1, 2)
+    ax_incorrect.set_title('❌ Misclassified Images (Top 10 by confidence in wrong class)', 
+                          fontsize=16, fontweight='bold', color='red')
+    ax_incorrect.axis('off')
+    
+    incorrect_images = []
+    incorrect_labels = []
+    for i, (_, row) in enumerate(incorrect_df.head(10).iterrows()):
+        img = cv2.imread(row['filepath'])
+        if img is not None:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = cv2.resize(img, (150, 150))
+            
+            # Add prediction text
+            pred_class = row['predicted_class'].replace('_', '\n')
+            cv2.putText(img, f"{pred_class}", (5, 30),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 0), 1)
+            cv2.putText(img, f"{row['confidence']:.3f}", (5, 140),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+            incorrect_images.append(img)
+            incorrect_labels.append(row['predicted_class'])
+    
+    if incorrect_images:
+        incorrect_grid = np.hstack(incorrect_images)
+        ax_incorrect.imshow(incorrect_grid)
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    print(f"✅ Visualization saved to: {output_path}")
+    
+    # Print summary
+    print("\nSummary:")
+    print(f"  Correctly classified: {len(correct_df)}/{len(df)} ({len(correct_df)/len(df)*100:.1f}%)")
+    print(f"  Misclassified: {len(incorrect_df)}/{len(df)} ({len(incorrect_df)/len(df)*100:.1f}%)")
+    
+    print("\nMisclassification breakdown:")
+    for pred_class, count in incorrect_df['predicted_class'].value_counts().items():
+        print(f"  → {pred_class}: {count} images")
+    
+    return fig
+
+def create_confusion_analysis(csv_path: str):
+    """
+    Analyze which classes ecoglasses are confused with.
+    """
+    df = pd.read_csv(csv_path)
+    
+    print("\n" + "="*60)
+    print("CONFUSION ANALYSIS")
+    print("="*60)
+    
+    # For each image, find the top 2 predicted classes
+    df['second_best_class'] = df[['prob_cardboard_paper', 'prob_ecoglasses', 
+                                   'prob_metal_plastic', 'prob_trash']].apply(
+        lambda row: sorted([
+            ('cardboard_paper', row['prob_cardboard_paper']),
+            ('ecoglasses', row['prob_ecoglasses']),
+            ('metal_plastic', row['prob_metal_plastic']),
+            ('trash', row['prob_trash'])
+        ], key=lambda x: x[1], reverse=True)[1][0], axis=1
+    )
+    
+    df['second_best_prob'] = df[['prob_cardboard_paper', 'prob_ecoglasses', 
+                                  'prob_metal_plastic', 'prob_trash']].apply(
+        lambda row: sorted([
+            row['prob_cardboard_paper'],
+            row['prob_ecoglasses'],
+            row['prob_metal_plastic'],
+            row['prob_trash']
+        ], reverse=True)[1], axis=1
+    )
+    
+    # Analyze close calls (where second best is close to best)
+    close_calls = df[abs(df['confidence'] - df['second_best_prob']) < 0.2]
+    
+    print(f"\nClose calls (top 2 classes within 0.2 probability): {len(close_calls)}")
+    print("\nMost common confusions:")
+    for _, row in close_calls.head(10).iterrows():
+        print(f"  {Path(row['filename']).name}: {row['predicted_class']} ({row['confidence']:.3f}) "
+              f"vs {row['second_best_class']} ({row['second_best_prob']:.3f})")
+    
+    # Average probabilities by prediction
+    print("\n\nAverage class probabilities by prediction:")
+    print("-"*60)
+    for pred_class in df['predicted_class'].unique():
+        subset = df[df['predicted_class'] == pred_class]
+        print(f"\nWhen predicted as '{pred_class}' ({len(subset)} images):")
+        print(f"  cardboard_paper: {subset['prob_cardboard_paper'].mean():.3f}")
+        print(f"  ecoglasses:      {subset['prob_ecoglasses'].mean():.3f}")
+        print(f"  metal_plastic:   {subset['prob_metal_plastic'].mean():.3f}")
+        print(f"  trash:           {subset['prob_trash'].mean():.3f}")
+
+def main():
+    csv_path = 'ecoglasses_bandeja_predictions.csv'
+    
+    if not Path(csv_path).exists():
+        print(f"Error: {csv_path} not found!")
+        print("Run: python batch_predict.py data/custom/ecoglasses_bandeja_jpg")
+        return
+    
+    print("Creating visualization...")
+    create_visualization_grid(csv_path)
+    
+    print("\nAnalyzing confusions...")
+    create_confusion_analysis(csv_path)
+    
+    print("\n" + "="*60)
+    print("Analysis complete!")
+    print("  - Visualization: prediction_visualization.png")
+    print("  - Full results: ecoglasses_bandeja_predictions.csv")
+    print("="*60)
+
+if __name__ == "__main__":
+    main()
+```
+
+--- END FILE: visualize_predictions.py ---

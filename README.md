@@ -117,14 +117,16 @@ camera_arduino = CameraInferenceWithArduino(
     stability_duration=4.0,  # Espera 4 segundos de clasificación estable
     stereo_mode='left',  # Para cámara estéreo, usar 'left' o 'right'
     black_threshold=0.7,  # 70% de pixeles negros = bandeja vacía
-    brightness_threshold=40  # Brillo máximo para considerar pixel "negro"
+    brightness_threshold=40,  # Brillo máximo para considerar pixel "negro"
+    min_confidence=0.5  # Confianza mínima (0.5-0.6 para ecoglasses, 0.7 estándar)
 )
 camera_arduino.run()
 ```
 
 **Mejoras importantes:**
 - **Estabilidad temporal**: El sistema espera 4-5 segundos con la misma clasificación antes de enviar al Arduino, evitando clasificaciones erróneas por frames individuales
-- **Detección de bandeja vacía**: No clasifica cuando detecta que la bandeja está vacía (mayoría de pixeles negros), evitando movimientos del motor sin objeto
+- **Detección de bandeja vacía**: No clasifica cuando detecta que la bandeja está vacía (mayoría de pixeles negros), evitando movimientos del motor sin objeto. El sistema resetea automáticamente cuando detecta la bandeja vacía, permitiendo detectar la misma clase nuevamente
+- **Confianza ajustable**: Threshold de confianza configurable para optimizar detección (valores más bajos detectan objetos difíciles como ecoglasses, valores altos reducen falsos positivos)
 - **Zoom digital**: Acercar/alejar la imagen con teclas `+`/`-` (rango: 1.0x a 3.0x)
 - **Soporte para cámara estéreo**: Extrae automáticamente la vista izquierda o derecha antes de procesar
 - **Indicador visual**: Muestra "✓ STABLE" cuando la clasificación es consistente y "BANDEJA VACIA" cuando no hay objeto
@@ -247,11 +249,19 @@ Para reentrenar el modelo, ejecutar secuencialmente:
 #### Detección de Bandeja Vacía
 - Analiza el porcentaje de pixeles oscuros en cada frame
 - No clasifica ni envía comandos cuando la bandeja está vacía (fondo negro)
+- **Resetea el estado automáticamente**: Permite detectar la misma clase repetidamente después de que la bandeja estuvo vacía
 - Previene movimientos innecesarios del motor
 - Muestra "BANDEJA VACIA - Esperando objeto..." en pantalla
 - Parámetros ajustables:
   - `black_threshold`: Porcentaje de negro para considerar vacío (default: 0.7 = 70%)
   - `brightness_threshold`: Brillo máximo para pixel "negro" (default: 40/255)
+
+#### Confianza de Detección Ajustable
+- Threshold de confianza configurable para optimizar la detección según el tipo de objeto
+- Valores más bajos (0.5-0.6): Mejor detección de objetos difíciles como ecoglasses
+- Valores más altos (0.7-0.8): Menos falsos positivos, detecciones más seguras
+- Parámetro ajustable:
+  - `min_confidence`: Confianza mínima para considerar válida una predicción (default: 0.6)
 
 #### Visualización Mejorada
 - Indicador de estabilidad en pantalla ("✓ STABLE")
