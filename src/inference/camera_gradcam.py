@@ -301,10 +301,10 @@ class CameraInferenceWithGradCAM:
                                cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
                 else:
                     # Show empty frame indicator
-                    text = "BANDEJA VACIA - Esperando objeto..."
+                    text = "EMPTY TRAY - Waiting for object..."
                     cv2.putText(display_frame, text, (10, 30), 
                                cv2.FONT_HERSHEY_SIMPLEX, 1, (128, 128, 128), 2)
-                    cv2.putText(display_frame, f"Negro: {black_pct*100:.1f}% | Brillo: {avg_bright:.0f}", 
+                    cv2.putText(display_frame, f"Dark: {black_pct*100:.1f}% | Brightness: {avg_bright:.0f}", 
                                (10, 70),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (128, 128, 128), 2)
                 
