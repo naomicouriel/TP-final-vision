@@ -1,269 +1,276 @@
-# Computer Vision - Clasificación de Reciclables
+# Recyclable Waste Classifier
 
-Repositorio para el trabajo práctico final de Computer Vision. Sistema de clasificación automática de residuos reciclables usando MobileNetV3 con integración Arduino para control físico.
+**MobileNetV3 transfer learning for 4-class waste sorting, with Grad-CAM interpretability and Arduino actuation.**
 
-## Descripción del Proyecto
+An end-to-end computer vision system that identifies recyclable material from a live camera feed and physically sorts it. A MobileNetV3-Large classifier runs inference on each frame, Grad-CAM exposes what the network is actually looking at, and a temporal-stability layer decides when a prediction is trustworthy enough to command a two-servo Arduino sorting mechanism.
 
-Este proyecto implementa un clasificador de residuos que utiliza visión por computadora para identificar 4 categorías:
-- **cardboard_paper**: Cartón y papel
-- **ecoglasses**: Vasos ecológicos y eco-plásticos
-- **metal_plastic**: Metal y plástico tradicional
-- **trash**: Basura general
+The project covers the full path from raw dataset to deployed hardware: data consolidation, transfer learning, evaluation, model export (ONNX / TorchScript), real-time inference, and serial control of a physical actuator.
 
-El sistema incluye:
-- Modelo MobileNetV3 entrenado para clasificación
-- Visualización Grad-CAM para interpretabilidad
-- Inferencia en tiempo real con cámara
-- Integración con Arduino para control de hardware (clasificación física)
+<p align="center">
+  <img src="assets/gradcam_analysis.png" alt="Grad-CAM heatmaps over classified waste items" width="80%">
+</p>
 
-## Estructura del Proyecto
+---
 
-### `/src` - Código fuente principal
+## Table of Contents
 
-#### `src/data/`
-- **`dataset.py`**: Clases PyTorch Dataset para carga de datos
-- **`preprocessing.py`**: Preprocesamiento y división train/val/test
-- **`augmentation.py`**: Transformaciones y data augmentation
+- [What it does](#what-it-does)
+- [Results](#results)
+- [Architecture](#architecture)
+- [Repository layout](#repository-layout)
+- [Getting started](#getting-started)
+- [Real-time inference](#real-time-inference)
+- [Arduino integration](#arduino-integration)
+- [Training](#training)
+- [Engineering notes](#engineering-notes)
+- [Documentation](#documentation)
 
-#### `src/models/`
-- **`mobilenet.py`**: Arquitectura MobileNetV3 modificada para clasificación
+---
 
-#### `src/training/`
-- **`trainer.py`**: Loop de entrenamiento principal
-- **`losses.py`**: Funciones de pérdida (CrossEntropy, Focal Loss)
-- **`metrics.py`**: Métricas de evaluación (accuracy, precision, recall, F1)
-- **`callbacks.py`**: Early stopping y guardado de checkpoints
+## What it does
 
-#### `src/inference/`
-- **`predictor.py`**: Predictor para inferencia en imágenes individuales
-- **`camera.py`**: Inferencia en tiempo real con cámara web
-- **`gradcam.py`**: Implementación de Grad-CAM para visualización
-- **`camera_gradcam.py`**: Cámara con visualización Grad-CAM integrada
+The classifier distinguishes four waste categories:
 
-#### `src/utils/`
-- **`config.py`**: Gestión de configuraciones YAML
-- **`logger.py`**: Sistema de logging
-- **`visualization.py`**: Utilidades para gráficos y visualización
+| ID | Class | Contents |
+|----|-------|----------|
+| 0 | `cardboard_paper` | Cardboard and paper |
+| 1 | `ecoglasses` | Eco-glass and eco-plastic containers (custom dataset) |
+| 2 | `metal_plastic` | Metal and conventional plastic |
+| 3 | `trash` | Non-recyclable waste (glass mapped here) |
 
-#### `src/arduino/`
-- Código de referencia para Arduino Nano
-- Controla servos para clasificación física de residuos en 4 cuadrantes
-- Comunicación serial USB (9600 baud)
-- **`arduino_tester.ino`**: Código de prueba para Arduino
-- **`classification_tester.ino`**: Código de prueba de funcionamiento de coordinación de ambos servos
-- **`serial_instructions.ino`**: Código principal para recibir instrucciones de clasificación desde el PC por serial y mover los servos
-  
-### `/configs`
-- **`mobilenet_config.yaml`**: Hiperparámetros del modelo y entrenamiento
+Around that model sit four subsystems:
 
-### `/notebooks`
-- **`01_data_preparation.ipynb`**: Preparación y exploración de datos
-- **`02_train_mobilenet.ipynb`**: Entrenamiento del modelo
-- **`03_inference_demo.ipynb`**: **Notebook principal de inferencia** 
+- **Training pipeline** — transfer learning on MobileNetV3-Large with cosine LR annealing, label smoothing, mixed-precision training and early stopping, driven entirely from a YAML config.
+- **Interpretability** — Grad-CAM heatmaps generated from the last convolutional block, available both offline and overlaid live on the camera feed.
+- **Real-time inference** — webcam and stereo-camera support, digital zoom, empty-tray detection, and a temporal stability filter.
+- **Hardware control** — serial link to an Arduino Nano driving two servos that route each item into one of four quadrants.
 
-### `/data`
-- **`raw/`**: Dataset original de clasificación de basura
-- **`processed/`**: Datos procesados (train/val/test splits)
-- **`custom/`**: Imágenes personalizadas para testing (ecoglasses)
+## Results
 
-### `/outputs`
-- **`checkpoints/`**: Modelos entrenados (`.pt`)
-- **`exports/`**: Modelos exportados (ONNX, TorchScript)
-- **`logs/`**: Logs de entrenamiento
+| Metric | Value |
+|--------|-------|
+| Backbone | MobileNetV3-Large (5.4M parameters, ImageNet pretrained) |
+| Dataset | 13,996 images (13,901 Kaggle + 95 custom ecoglasses) |
+| Split | 70 / 15 / 15 train / val / test |
+| Input resolution | 224 × 224 |
+| Training | 30 epochs, Adam, batch size 64, AMP enabled |
+| Exported formats | ONNX, TorchScript |
 
-## Uso Rápido
+Measured on the custom ecoglasses hold-out set (95 images), the model reaches **58.9% accuracy**, with 38.9% of errors falling into `metal_plastic` — the reflective, metallic-looking surface of the eco-glass containers is the dominant failure mode. Full per-class metrics, the confusion analysis and the training curves are in [`PROJECT_REPORT.md`](PROJECT_REPORT.md).
 
-### 1. Inferencia con Notebook (Recomendado)
+A fine-tuning pass on the ecoglasses subset alone was attempted and **rejected**: it dropped accuracy from 58.9% to 46.3% through catastrophic forgetting of the other three classes. The original checkpoint is the one shipped. The experiment and its numbers are preserved in [`archive/REALTIME_DETECTION_GUIDE.md`](archive/REALTIME_DETECTION_GUIDE.md).
 
-Abrir y ejecutar **`notebooks/03_inference_demo.ipynb`**:
+<p align="center">
+  <img src="assets/metrics_epochs.png" alt="Training and validation metrics per epoch" width="70%">
+</p>
 
-#### Contenido del notebook:
+## Architecture
 
-1. **Configuración inicial**: Importar módulos y cargar modelo entrenado
-2. **ArduinoController**: Clase para comunicación serial con Arduino
-   - Envía instrucciones (0-3) según la clase predicha
-   - Configurable para Windows/Linux/Mac
-3. **Carga del predictor**: Inicializa el modelo con pesos entrenados
-4. **Predicción en imágenes estáticas**: Test con imágenes individuales
-5. **Visualización Grad-CAM**: Mapas de calor mostrando regiones importantes
-6. **Inferencia en tiempo real**: 
-   - Cámara básica (`CameraInference`)
-   - Cámara con Grad-CAM (`CameraInferenceWithGradCAM`)
-   - Cámara con Arduino integrado (`CameraInferenceWithArduino`)
-7. **Control manual del Arduino**: Testing de comunicación serial
+```
+Camera frame
+     │
+     ├─► stereo split (optional) ─► digital zoom ─► empty-tray check
+     │                                                    │
+     │                                              tray empty? ──► skip + reset state
+     │                                                    │
+     ├─► preprocessing (resize 224, ImageNet normalisation)
+     │
+     ├─► MobileNetV3-Large ─► softmax ─► (class_id, confidence)
+     │                    └─► Grad-CAM ─► heatmap overlay
+     │
+     ├─► temporal stability filter (same class held ≥ 4 s above threshold)
+     │
+     └─► serial write (0-3) ─► Arduino ─► 2× servo ─► physical bin
+```
 
-#### Ejecutar inferencia con cámara:
+## Repository layout
+
+```
+├── src/
+│   ├── data/          Dataset classes, preprocessing, augmentation
+│   ├── models/        MobileNetV3 architecture and classification head
+│   ├── training/      Trainer loop, losses, metrics, callbacks
+│   ├── inference/     Predictor, camera runners, Grad-CAM
+│   ├── utils/         Config loading, logging, visualisation
+│   └── arduino/       Sketches for the Arduino Nano controller
+├── notebooks/         01 data prep · 02 training · 03 inference demo · 04 full pipeline
+├── configs/           mobilenet_config.yaml — all hyperparameters
+├── data/              raw / processed splits / custom ecoglasses images
+├── outputs/           checkpoints and exported models (ONNX, TorchScript)
+├── assets/            Figures used in the documentation
+└── archive/           Development notes and one-off experiment scripts
+```
+
+### Source modules
+
+| Module | Responsibility |
+|--------|----------------|
+| `src/data/dataset.py` | PyTorch `Dataset` implementations |
+| `src/data/preprocessing.py` | Class consolidation and train/val/test splitting |
+| `src/data/augmentation.py` | Train and eval transform pipelines |
+| `src/models/mobilenet.py` | MobileNetV2 / V3-Small / V3-Large with a custom head |
+| `src/training/trainer.py` | Training loop with AMP and scheduling |
+| `src/training/losses.py` | Cross-entropy and focal loss |
+| `src/training/metrics.py` | Accuracy, precision, recall, F1 |
+| `src/training/callbacks.py` | Early stopping and checkpointing |
+| `src/inference/predictor.py` | Single-image inference API |
+| `src/inference/camera.py` | Baseline webcam loop |
+| `src/inference/gradcam.py` | Grad-CAM implementation |
+| `src/inference/camera_gradcam.py` | Camera loop with Grad-CAM, stability filter and Arduino output |
+
+## Getting started
+
+```bash
+git clone https://github.com/naomicouriel/recyclable-waste-classifier.git
+cd recyclable-waste-classifier
+pip install -r requirements.txt
+```
+
+### Single-image prediction
 
 ```python
-# Cámara normal (mono)
+from src.inference.predictor import RecyclingPredictor
+
+predictor = RecyclingPredictor(model_path='outputs/checkpoints/best_model.pt', device='cpu')
+result = predictor.predict('path/to/image.jpg')
+
+# {'class_id': 1, 'class_name': 'ecoglasses', 'confidence': 0.85, 'probabilities': [...]}
+```
+
+### Batch prediction
+
+```bash
+python batch_predict.py --input_dir data/custom/ecoglasses --output_csv predictions.csv
+python visualize_predictions.py   # renders a correct/incorrect grid
+```
+
+### Interactive demo
+
+`notebooks/03_inference_demo.ipynb` is the main entry point. It loads the trained model, runs static-image and Grad-CAM predictions, opens the live camera loop, and exposes manual controls for the Arduino serial link.
+
+## Real-time inference
+
+```python
+from src.inference.camera_gradcam import CameraInferenceWithGradCAM
+
+# Standard webcam
 camera = CameraInferenceWithGradCAM(predictor, camera_id=0, enable_gradcam=True)
 camera.run()
 
-# Cámara ESTÉREO - usar solo vista izquierda o derecha
+# Stereo camera — process only one of the two side-by-side views
 camera = CameraInferenceWithGradCAM(
-    predictor, 
-    camera_id=0, 
+    predictor,
+    camera_id=0,
     enable_gradcam=True,
-    stereo_mode='left'  # o 'right' para vista derecha
+    stereo_mode='left',       # or 'right'
 )
 camera.run()
+```
 
-# Con Arduino y detección de bandeja vacía
-arduino = ArduinoController(port='COM3', baudrate=9600)  # Ajustar puerto
+With hardware attached:
+
+```python
+arduino = ArduinoController(port='COM3', baudrate=9600)
+
 camera_arduino = CameraInferenceWithArduino(
-    predictor, 
-    arduino, 
+    predictor,
+    arduino,
     camera_id=0,
-    stability_duration=4.0,  # Espera 4 segundos de clasificación estable
-    stereo_mode='left',  # Para cámara estéreo, usar 'left' o 'right'
-    black_threshold=0.7,  # 70% de pixeles negros = bandeja vacía
-    brightness_threshold=40,  # Brillo máximo para considerar pixel "negro"
-    min_confidence=0.5  # Confianza mínima (0.5-0.6 para ecoglasses, 0.7 estándar)
+    stability_duration=4.0,      # seconds of consistent classification before acting
+    stereo_mode='left',
+    black_threshold=0.7,         # 70% dark pixels ⇒ tray considered empty
+    brightness_threshold=40,     # max brightness for a pixel to count as "dark"
+    min_confidence=0.5,          # 0.5–0.6 for ecoglasses, 0.7 as a general default
 )
 camera_arduino.run()
 ```
 
-**Mejoras importantes:**
-- **Estabilidad temporal**: El sistema espera 4-5 segundos con la misma clasificación antes de enviar al Arduino, evitando clasificaciones erróneas por frames individuales
-- **Detección de bandeja vacía**: No clasifica cuando detecta que la bandeja está vacía (mayoría de pixeles negros), evitando movimientos del motor sin objeto. El sistema resetea automáticamente cuando detecta la bandeja vacía, permitiendo detectar la misma clase nuevamente
-- **Confianza ajustable**: Threshold de confianza configurable para optimizar detección (valores más bajos detectan objetos difíciles como ecoglasses, valores altos reducen falsos positivos)
-- **Zoom digital**: Acercar/alejar la imagen con teclas `+`/`-` (rango: 1.0x a 3.0x)
-- **Soporte para cámara estéreo**: Extrae automáticamente la vista izquierda o derecha antes de procesar
-- **Indicador visual**: Muestra "✓ STABLE" cuando la clasificación es consistente y "BANDEJA VACIA" cuando no hay objeto
+### Keyboard controls
 
-### 2. Integración con Arduino
+| Key | Action |
+|-----|--------|
+| `q` | Quit |
+| `g` | Toggle Grad-CAM overlay |
+| `s` | Save current frame |
+| `+` / `=` | Zoom in (up to 3.0×) |
+| `-` / `_` | Zoom out |
 
-#### Hardware requerido:
-- Arduino Nano (o compatible)
-- 2 servomotores (control de clasificación física)
-- Conexión USB al computador
+## Arduino integration
 
-#### Configuración:
+**Hardware:** Arduino Nano (or compatible), two servo motors, USB connection.
 
-1. Subir código de `src/arduino_instruction.ino` al Arduino usando Arduino IDE
-2. Conectar Arduino por USB
-3. Identificar puerto serial:
-   - **Windows**: `COM3`, `COM4`, etc.
-   - **Linux**: `/dev/ttyUSB0`, `/dev/ttyACM0`
-   - **macOS**: `/dev/tty.usbserial-*`
+1. Flash `src/arduino/serial_instructions.ino` from the Arduino IDE.
+2. Connect the board over USB and identify the serial port:
+   - Windows — `COM3`, `COM4`, …
+   - Linux — `/dev/ttyUSB0`, `/dev/ttyACM0`
+   - macOS — `/dev/tty.usbserial-*`
+3. Pass that port to `ArduinoController(port=..., baudrate=9600)`.
 
-4. En el notebook, configurar puerto correcto:
-```python
-arduino = ArduinoController(port='TU_PUERTO_AQUI', baudrate=9600)
-```
+The host writes a single class ID (`0`–`3`) over serial; the sketch rotates the two servos to the matching quadrant and drops the item.
 
-#### Funcionamiento:
-- El modelo predice la clase del residuo (0-3)
-- Se envía el ID de clase al Arduino por serial
-- El Arduino mueve los servos al cuadrante correspondiente
-- El residuo se clasifica físicamente en el contenedor correcto
-
-#### Mapeo de cuadrantes:
 ```
 ┌─────────┬─────────┐
-│    0    │    1    │  0: cardboard_paper
-│         │         │  1: ecoglasses
-├─────────┼─────────┤  2: metal_plastic
-│    2    │    3    │  3: trash
+│    0    │    1    │   0: cardboard_paper
+│         │         │   1: ecoglasses
+├─────────┼─────────┤   2: metal_plastic
+│    2    │    3    │   3: trash
 └─────────┴─────────┘
 ```
 
-## Dependencias Principales
+Sketches in `src/arduino/`:
 
-- PyTorch
-- OpenCV (`cv2`)
-- torchvision
-- numpy, pandas
-- matplotlib, seaborn
-- pyserial (para Arduino)
-- PIL/Pillow
+| File | Purpose |
+|------|---------|
+| `serial_instructions.ino` | Production sketch — reads class IDs over serial and drives the servos |
+| `classification_tester.ino` | Verifies coordinated movement of both servos |
+| `arduino_tester.ino` | Minimal hardware smoke test |
 
-## 🎮 Controles de Cámara
+## Training
 
-- **`q`**: Salir
-- **`g`**: Toggle Grad-CAM (activar/desactivar visualización)
-- **`s`**: Guardar frame actual
-- **`+` / `=`**: Zoom in (acercar)
-- **`-` / `_`**: Zoom out (alejar)
+Run the notebooks in order:
 
-### Funcionamiento del Sistema de Estabilidad
+1. `notebooks/01_data_preparation.ipynb` — download, consolidate the six source classes into four, and write the splits.
+2. `notebooks/02_train_mobilenet.ipynb` — train and export the model.
 
-Para evitar enviar múltiples comandos al Arduino en cada frame de video:
+All hyperparameters live in `configs/mobilenet_config.yaml`, including the class mapping, augmentation probabilities, scheduler and early-stopping settings.
+
+## Engineering notes
+
+These are the problems that only appeared once the model met real hardware.
+
+**Temporal stability.** A per-frame classifier fires 30 commands per second at a servo. The stability filter tracks recent high-confidence predictions and only emits a serial instruction once the same class has held for 4–5 consecutive seconds, then suppresses repeats until the classification changes.
 
 ```
-Frame 1: plastic (0.85) ─┐
-Frame 2: plastic (0.88)  ├─── Acumulando...
-Frame 3: plastic (0.82)  │
-Frame 4: plastic (0.90)  ├─── 4 segundos ✓
-Frame 5: plastic (0.87) ─┘    └─→ ENVIAR al Arduino (clase 2)
-Frame 6: plastic (0.91) ────── No enviar (ya enviado)
-Frame 7: glass (0.75)   ─┐
-Frame 8: glass (0.80)    ├─── Acumulando nueva clase...
-...
+Frame 1: metal_plastic (0.85) ─┐
+Frame 2: metal_plastic (0.88)  ├─ accumulating…
+Frame 3: metal_plastic (0.82)  │
+Frame 4: metal_plastic (0.90)  ├─ 4 seconds reached ✓
+Frame 5: metal_plastic (0.87) ─┘  └─► send class 2 to Arduino
+Frame 6: metal_plastic (0.91) ──── suppressed (already sent)
+Frame 7: ecoglasses    (0.75) ─┐
+Frame 8: ecoglasses    (0.80)  ├─ accumulating new class…
 ```
 
-**Proceso:**
-1. El sistema rastrea las últimas predicciones con alta confianza (>0.7)
-2. Solo cuando **la misma clase se mantiene por 4-5 segundos consecutivos**, se considera "estable"
-3. Una vez estable, se envía **una única instrucción** al Arduino
-4. No se envía otra instrucción hasta que cambie la clasificación y se estabilice nuevamente
+**Empty-tray detection.** With nothing on the tray the model still returns its most confident guess, which moved the servos on empty air. Each frame is checked for the proportion of dark pixels; above `black_threshold` the frame is skipped. This doubles as a state reset, so the same item can be placed, removed and placed again and still be detected the second time.
 
-Esto previene movimientos erráticos del hardware y mejora la precisión del sistema físico.
+**Stereo cameras.** A stereo webcam delivers two views in one side-by-side frame, which made digital zoom crop sideways across the seam. The pipeline now extracts a single view before any other processing.
 
-## Resultados del Modelo
+**Confidence threshold.** Exposed as `min_confidence` rather than hard-coded: 0.5–0.6 recovers difficult reflective objects such as the ecoglasses, 0.7–0.8 suppresses false positives on easier classes.
 
-El modelo entrenado se encuentra en `outputs/checkpoints/best_model.pt` y alcanza alta precisión en la clasificación de las 4 categorías. Los resultados detallados de entrenamiento están en `PROJECT_REPORT.md`.
+## Documentation
 
-## Entrenamiento
+| Document | Contents |
+|----------|----------|
+| [`PROJECT_REPORT.md`](PROJECT_REPORT.md) | Full technical report — dataset, architecture, training configuration, evaluation, deployment |
+| [`GRADCAM_GUIDE.md`](GRADCAM_GUIDE.md) | How Grad-CAM works here and how to read the heatmaps |
+| [`archive/`](archive/) | Development notes, the rejected fine-tuning experiment, and one-off analysis scripts |
 
-Para reentrenar el modelo, ejecutar secuencialmente:
-1. `notebooks/01_data_preparation.ipynb` - Preparar datos
-2. `notebooks/02_train_mobilenet.ipynb` - Entrenar modelo
+## Dependencies
 
-## 📝 Notas
+PyTorch · torchvision · OpenCV · NumPy · pandas · matplotlib · seaborn · Pillow · PyYAML · pyserial · onnx
 
-- Los archivos `.py` en la raíz fueron utilizados para tests durante desarrollo
-- El código de producción está en el directorio `src/`
-- Grad-CAM ayuda a entender qué características visuales usa el modelo para clasificar
-- El umbral de confianza para Arduino es configurable (default: 0.7)
+Install with `pip install -r requirements.txt`.
 
-### ⚡ Características Avanzadas
+## Author
 
-#### Sistema de Estabilidad Temporal
-- Previene envíos múltiples al Arduino durante video continuo
-- Requiere clasificación consistente durante 4-5 segundos antes de enviar
-- Configurable mediante el parámetro `stability_duration`
-
-#### Zoom Digital
-- Acercamiento hasta 3x sin pérdida de calidad significativa
-- Útil para objetos pequeños o distantes
-- Control en tiempo real con teclas `+` y `-`
-- Funciona correctamente con cámaras estéreo (aplicado después de extraer vista única)
-
-#### Soporte Cámara Estéreo
-- Detecta automáticamente si tu cámara envía dos vistas lado a lado
-- Extrae solo la vista izquierda o derecha antes de procesar
-- Evita problemas de zoom "lateral" en sistemas estéreo
-- Configuración: `stereo_mode='left'` o `'right'` (None para cámara normal)
-
-#### Detección de Bandeja Vacía
-- Analiza el porcentaje de pixeles oscuros en cada frame
-- No clasifica ni envía comandos cuando la bandeja está vacía (fondo negro)
-- **Resetea el estado automáticamente**: Permite detectar la misma clase repetidamente después de que la bandeja estuvo vacía
-- Previene movimientos innecesarios del motor
-- Muestra "BANDEJA VACIA - Esperando objeto..." en pantalla
-- Parámetros ajustables:
-  - `black_threshold`: Porcentaje de negro para considerar vacío (default: 0.7 = 70%)
-  - `brightness_threshold`: Brillo máximo para pixel "negro" (default: 40/255)
-
-#### Confianza de Detección Ajustable
-- Threshold de confianza configurable para optimizar la detección según el tipo de objeto
-- Valores más bajos (0.5-0.6): Mejor detección de objetos difíciles como ecoglasses
-- Valores más altos (0.7-0.8): Menos falsos positivos, detecciones más seguras
-- Parámetro ajustable:
-  - `min_confidence`: Confianza mínima para considerar válida una predicción (default: 0.6)
-
-#### Visualización Mejorada
-- Indicador de estabilidad en pantalla ("✓ STABLE")
-- Color verde cuando hay clasificación estable
-- Probabilidades de todas las clases en tiempo real
+Naomi Couriel — [github.com/naomicouriel](https://github.com/naomicouriel)
